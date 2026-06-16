@@ -1,0 +1,44 @@
+# 開発環境: pgvector(PostgreSQL) + Ollama
+# 起動: docker compose -f docker/docker-compose.yml up -d
+# 認証情報はリポジトリ root の .env から読み込む（env_file）。
+#
+# 注意(macOS): Docker 内 Ollama は Apple GPU(Metal) を使えず CPU 動作になる。
+#   brew 版 Ollama を起動していると 11434 ポートが衝突するため、
+#   docker 版を使う間は native Ollama を停止すること（README 参照）。
+
+services:
+  db:
+    image: pgvector/pgvector:pg17
+    container_name: biblio-db
+    restart: unless-stopped
+    env_file:
+      - ../.env
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      # スキーマは初回起動（データ空）時に自動適用される
+      - ../infra/db:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: biblio-ollama
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama:/root/.ollama
+    healthcheck:
+      test: ["CMD-SHELL", "ollama list >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  pgdata:
+  ollama:

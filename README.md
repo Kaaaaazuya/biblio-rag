@@ -40,16 +40,29 @@ pre-commit install
 pre-commit run --all-files   # 初回フルスキャンで動作確認
 ```
 
-### T1 以降で必要（まだ未実装）
+### 開発スタックの起動（T1）
 
 ```bash
-# DB(pgvector) と Ollama を起動（docker-compose.yml は T1 で追加）
-docker compose up -d
+# DB(pgvector) と Ollama を起動（スキーマは初回起動時に自動適用）
+docker compose -f docker/docker-compose.yml up -d
 
-# 埋め込みモデルを取得（約 1.2GB・初回のみ）
-ollama pull bge-m3
-# 動作確認
+# 埋め込みモデルを取得（約 1.2GB・初回のみ）※コンテナ内の Ollama に対して実行
+docker compose -f docker/docker-compose.yml exec ollama ollama pull bge-m3
+
+# 動作確認（1024 次元のベクトルが返る）
 curl http://localhost:11434/api/embed -d '{"model":"bge-m3","input":"テスト"}'
+
+# DB スキーマ確認
+docker compose -f docker/docker-compose.yml exec db psql -U biblio -d biblio -c "\d chunks"
+```
+
+> **⚠️ macOS のポート衝突注意:** brew 版 Ollama を起動していると 11434 が衝突する。docker 版を使う間は native を止める（`brew services stop ollama` またはアプリ終了）。
+> **⚠️ パフォーマンス:** Docker 内 Ollama は Metal GPU を使えず CPU 動作。速度を優先したい場合は native Ollama に切り替える構成も可。
+
+停止 / 破棄:
+```bash
+docker compose -f docker/docker-compose.yml down        # 停止（データは保持）
+docker compose -f docker/docker-compose.yml down -v     # ボリューム含め破棄（スキーマ再適用したい時）
 ```
 
 ---
