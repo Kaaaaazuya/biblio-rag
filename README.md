@@ -101,6 +101,19 @@ uv run python -m workers.chunk --force    # 全 md を再チャンク
 uv run python -m workers.embed --force    # 全 book を再埋め込み（洗い替え）
 ```
 
+## WebUI（アップロードの足場）
+
+ブラウザから PDF を S3(MinIO) へ直接アップロードする最小スキャフォールド（presigned URL 方式）。
+
+```bash
+docker compose -f docker/docker-compose.yml up -d   # MinIO 含む
+uv run uvicorn webui.server:app --reload --port 8000
+open http://localhost:8000
+```
+
+PDF・書名・著者を入力 → `raw/<file>.pdf` と `books/<book_id>.meta.json` が作られる。
+あとは `extract → chunk → embed` で取り込む。詳細は [webui/README.md](webui/README.md)。
+
 ## セキュリティ / データ取り扱いルール（厳守）
 
 このリポジトリは**パブリック公開前提**。以下を機械的・運用的に守る。

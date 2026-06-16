@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>biblio-rag · 書籍アップロード</title>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <main class="card">
+      <h1>書籍アップロード</h1>
+      <p class="muted">
+        PDF はブラウザから S3（開発は MinIO）へ直接アップロードされます。
+        アップロード後、取り込みは <code>extract → chunk → embed</code> で行います。
+      </p>
+
+      <form id="form">
+        <label>
+          PDF ファイル
+          <input type="file" id="file" accept="application/pdf" required />
+        </label>
+        <label>
+          書名 (title)
+          <input type="text" id="title" placeholder="例: クリーンコード" required />
+        </label>
+        <label>
+          著者 (author)
+          <input type="text" id="author" placeholder="例: 山田太郎" required />
+        </label>
+        <button type="submit" id="submit">アップロード</button>
+      </form>
+
+      <progress id="progress" max="100" value="0" hidden></progress>
+      <p id="status" class="status" role="status"></p>
+    </main>
+
+    <script src="/app.js"></script>
+  </body>
+</html>
