@@ -77,7 +77,7 @@ OP → S3(raw/*.pdf) → extract-queue → [Extract:Fargate] PyMuPDF抽出
 | 項目 | 開発（ローカル） | 本番（AWS） |
 |---|---|---|
 | メッセージキュー | LocalStack SQS | Amazon SQS |
-| ストレージ | LocalStack S3 / ローカルFS | Amazon S3 |
+| ストレージ | MinIO（S3互換・raw PDF） + ローカルFS（normalized/chunks） | Amazon S3 |
 | ① 抽出 実行 | Docker コンテナ | ECS Fargate（min=0） |
 | ②③ 実行 | LocalStack Lambda / コンテナ | Lambda（SQSトリガー） |
 | 埋め込み | Ollama `bge-m3`（1024次元） | Bedrock Titan V2（1024次元） |
