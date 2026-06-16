@@ -115,6 +115,15 @@ class VectorStore(ABC):
 | Embedder | OllamaEmbedder | BedrockEmbedder |
 | VectorStore | PgVectorStore（Docker） | PgVectorStore（Aurora・同一実装） |
 
+### 既知の限界（MVP）
+
+- **多段組みの読み順**: ① は行を `(page, y0, x0)` で整列するため、2段組みは左右段が交互になりうる。
+  対象は単段の素直な PDF を想定。段組み対応は将来課題（ブロックの列クラスタリング等）。
+- **見出しレベルの不連続**: ② は見出しパスの位置で `chapter`/`section` を決めるため、`#`→`###` のように
+  レベルが飛ぶ構成では割り当てがずれうる。① の出力（書名=`#`/章=`##`/節=`###`）では問題ない。
+- **page 未取得**: チャンクの `page` は MVP では `null`（列は将来の表示用に保持）。
+  ページ番号を持たせるには ① がページ境界を中間データに残す拡張が必要（[ADR 0001](adr/0001-layer-separation.md) の制約参照）。
+
 ## 8. ディレクトリ構成
 
 [README.md](../README.md#ディレクトリ構成目標) を参照（`books/{raw,normalized,chunks}` / `workers/{extract,chunk,embed}` / `infra/db` / `docker` / `tests/fixtures` / `docs`）。

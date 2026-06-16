@@ -3,6 +3,7 @@
 import pytest
 
 from workers.chunk import chunk_markdown
+from workers.chunk.chunk import _split_text
 
 META = {"book_id": "sample_book", "title": "テスト書", "author": "テスト著者"}
 
@@ -79,3 +80,26 @@ def test_size_is_configurable_and_sentence_aware():
 def test_overlap_must_be_smaller_than_size():
     with pytest.raises(ValueError):
         chunk_markdown(MD, META, size=100, overlap=100)
+
+
+def test_split_text_overlaps():
+    text = "".join(f"第{i}文。" for i in range(60))  # 句点つきの長文
+    chunks = _split_text(text, size=80, overlap=20)
+    assert len(chunks) >= 2
+    assert sum(len(c) for c in chunks) > len(text)  # overlap の重複ぶん総量が増える
+
+
+def test_split_text_long_sentence_without_period_terminates():
+    text = "あ" * 200  # 句点が無い長文（無限ループしないこと）
+    chunks = _split_text(text, size=50, overlap=10)
+    assert len(chunks) >= 3
+    assert all(len(c) <= 75 for c in chunks)  # size*1.5 を大きく超えない
+    assert "".join(c[:40] for c in chunks).count("あ") > 0  # 文字が失われない
+
+
+def test_no_heading_body_has_no_prefix():
+    recs = chunk_markdown("見出しのない本文である。これだけ。", META)
+    assert len(recs) == 1
+    assert recs[0]["chapter"] is None and recs[0]["section"] is None
+    assert " > " not in recs[0]["text"]
+    assert recs[0]["text"].startswith("見出しのない本文")
