@@ -14,6 +14,7 @@
 - **Python 3.14 を uv で管理。** システム Python / 素の pip は使わない。
   - 実行: `uv run <script>` / 依存追加: `uv add <pkg>` / 同期: `uv sync`。
 - **npm は使わない**（方針）。フック類も npm 非依存（pre-commit + gitleaks）。
+- リント/整形は **Ruff**: `uv run ruff check --fix` / `uv run ruff format`。テストは `uv run pytest`。pre-commit で自動実行。
 - 埋め込み（開発）: Ollama `bge-m3`（`http://localhost:11434/api/embed`・1024次元）。
 - ベクトル DB（開発）: pgvector on Docker。スキーマは `VECTOR(1024)`。
 

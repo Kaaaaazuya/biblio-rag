@@ -17,7 +17,9 @@ PDF = FIXTURE_DIR / "sample_book.pdf"
 
 def _ensure_fixture() -> Path:
     if not PDF.exists():
-        spec = importlib.util.spec_from_file_location("make_fixture", FIXTURE_DIR / "make_fixture.py")
+        spec = importlib.util.spec_from_file_location(
+            "make_fixture", FIXTURE_DIR / "make_fixture.py"
+        )
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
         mod.build()
@@ -51,7 +53,10 @@ def test_header_footer_removed(md):
 
 def test_paragraph_lines_joined(md):
     # PDF 上で複数行に折り返された一文が、改行なしで連結されている
-    assert "検索対象となるベクトルインデックスを構築する取り込みパイプラインの設計をまとめたものである" in md
+    assert (
+        "検索対象となるベクトルインデックスを構築する取り込みパイプラインの設計をまとめたものである"
+        in md
+    )
 
 
 def test_paragraph_separation(md):

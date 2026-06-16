@@ -74,7 +74,9 @@ def _strip_header_footer(lines: list[_Line], heights: list[float]) -> list[_Line
             in_band.append(ln)
 
     # 帯の中で「ページをまたいで繰り返すテキスト」を走り書き（書名ヘッダ等）
-    norm = lambda t: re.sub(r"\s+", "", t)
+    def norm(t: str) -> str:
+        return re.sub(r"\s+", "", t)
+
     band_counts = Counter(norm(ln.text) for ln in in_band)
     repeat_threshold = max(2, n_pages // 2 + 1)
     repeated = {t for t, c in band_counts.items() if c >= repeat_threshold}
@@ -129,7 +131,7 @@ def extract_pdf_to_markdown(pdf_path: str | Path) -> str:
     lines.sort(key=lambda x: (x.page, x.y0, x.x0))
 
     blocks: list[str] = []
-    buf: list[str] = []          # 現在組み立て中の段落/見出しのテキスト
+    buf: list[str] = []  # 現在組み立て中の段落/見出しのテキスト
     buf_level: int | None = None  # None=本文段落、>=1=見出しレベル
     prev: _Line | None = None
 
@@ -158,10 +160,7 @@ def extract_pdf_to_markdown(pdf_path: str | Path) -> str:
 
 
 def _cli(argv: list[str]) -> int:
-    if argv:
-        paths = [Path(a) for a in argv]
-    else:
-        paths = sorted(RAW_DIR.glob("*.pdf"))
+    paths = [Path(a) for a in argv] if argv else sorted(RAW_DIR.glob("*.pdf"))
     if not paths:
         print(f"PDF が見つかりません（{RAW_DIR}/*.pdf または引数で指定）", file=sys.stderr)
         return 1
