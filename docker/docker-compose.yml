@@ -48,6 +48,8 @@ services:
     environment:
       MINIO_ROOT_USER: minioadmin
       MINIO_ROOT_PASSWORD: minioadmin
+      # ブラウザから presigned URL で直接 PUT できるよう CORS を許可（開発用）
+      MINIO_API_CORS_ALLOW_ORIGIN: "*"
     ports:
       - "9000:9000"   # S3 API エンドポイント
       - "9001:9001"   # 管理コンソール（http://localhost:9001）
