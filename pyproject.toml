@@ -1,0 +1,7 @@
+[project]
+name = "biblio-rag"
+version = "0.1.0"
+description = "日本語書籍 RAG パイプライン — PDF→抽出→チャンク→埋め込み→pgvector→検索 の取り込みパイプライン"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = []

@@ -1,0 +1,35 @@
+# ─────────────────────────────────────────────
+#  書籍データ（著作権物）— 絶対にコミットしない
+#  raw だけでなく抽出本文(normalized)・チャンク(chunks)も全文を含むため除外。
+#  「正本」はローカルディスク(開発) / S3(本番) に残す。git では管理しない。
+#  コミット可能な本文は tests/fixtures/ 配下の著作権フリー物のみ。
+# ─────────────────────────────────────────────
+books/
+
+# ─── 秘密情報 ───
+.env
+.env.*
+!.env.example
+
+# ─── Python / uv ───
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+.venv
+.ruff_cache/
+.pytest_cache/
+.mypy_cache/
+
+# ─── モデル / キャッシュ ───
+*.gguf
+.ollama/
+models/
+
+# ─── OS / エディタ ───
+.DS_Store
+.idea/
+.vscode/
+*.swp
