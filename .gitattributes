@@ -1,0 +1,6 @@
+# 改行コードを LF に正規化（macOS/Linux/CI で一貫させる）
+* text=auto eol=lf
+
+# バイナリ（差分・改行変換しない）
+*.pdf binary
+*.gguf binary

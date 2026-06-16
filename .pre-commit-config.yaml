@@ -1,0 +1,29 @@
+# 秘密情報・大容量ファイルの誤コミットを機械的にブロックする。
+# 導入: uv tool install pre-commit && pre-commit install
+# 手動全体スキャン: pre-commit run --all-files
+minimum_pre_commit_version: "4.0.0"
+
+repos:
+  # --- 秘密情報検出（brew でインストール済みの gitleaks バイナリを使用）---
+  # 公式フックは language: golang で毎回 go build が走るため、
+  # system 実行にして高速・安定化している（事前に `brew install gitleaks` 済み）。
+  - repo: local
+    hooks:
+      - id: gitleaks
+        name: gitleaks (detect secrets in staged changes)
+        entry: gitleaks protect --staged --redact --verbose
+        language: system
+        pass_filenames: false
+
+  # --- 基本ハイジーン + 事故防止 ---
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: detect-private-key
+      - id: check-added-large-files   # 書籍PDF等の大容量誤コミットを防ぐ
+        args: ["--maxkb=2000"]
+      - id: check-merge-conflict
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+      - id: check-yaml
+      - id: check-toml
