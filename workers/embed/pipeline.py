@@ -37,8 +37,10 @@ def embed_and_store(records: list[dict], embedder: Embedder, store: VectorStore)
 def _cli(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description="③ 埋め込み + 格納: JSONL → pgvector")
     parser.add_argument("paths", nargs="*", help="対象 .jsonl（省略時は books/chunks/*.jsonl）")
+    parser.add_argument("--force", action="store_true", help="格納済みも再埋め込み（洗い替え）")
     args = parser.parse_args(argv)
 
+    is_batch = not args.paths
     paths = [Path(p) for p in args.paths] if args.paths else sorted(CHUNKS_DIR.glob("*.jsonl"))
     if not paths:
         print(f"JSONL が見つかりません（{CHUNKS_DIR}/*.jsonl または引数で指定）", file=sys.stderr)
@@ -48,7 +50,18 @@ def _cli(argv: list[str]) -> int:
     store = PgVectorStore(config.database_url())
     try:
         for path in paths:
-            n = embed_and_store(load_jsonl(path), embedder, store)
+            records = load_jsonl(path)
+            if not records:
+                continue
+            book_id = records[0]["book_id"]
+            exists = store.count_book(book_id) > 0
+            # 既定: 一括実行で格納済みはスキップ（--force で洗い替え）
+            if is_batch and exists and not args.force:
+                print(f"スキップ（格納済み）: {path.name} (book_id={book_id})")
+                continue
+            if exists:
+                store.delete_book(book_id)  # 再投入前に既存を消してクリーンに入れ直す
+            n = embed_and_store(records, embedder, store)
             print(f"{path} -> pgvector ({n} chunks)")
     finally:
         store.close()

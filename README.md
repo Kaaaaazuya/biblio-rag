@@ -92,6 +92,15 @@ uv run python -m workers.embed
 uv run python -m workers.search "調べたいこと" --top-k 5
 ```
 
+**増分実行**: extract/chunk/embed は引数なしの一括実行で**処理済み（既存の md/jsonl・格納済み book_id）をスキップ**する。
+全件作り直したい（洗い替え）ときは `--force` を付ける（embed は既存を削除してから入れ直す）。
+特定ファイルを引数で指定した場合は常に処理する。
+
+```bash
+uv run python -m workers.chunk --force    # 全 md を再チャンク
+uv run python -m workers.embed --force    # 全 book を再埋め込み（洗い替え）
+```
+
 ## セキュリティ / データ取り扱いルール（厳守）
 
 このリポジトリは**パブリック公開前提**。以下を機械的・運用的に守る。

@@ -52,5 +52,17 @@ class PgVectorStore(VectorStore):
             cur.execute(_SEARCH, {"qv": _vec_literal(query_vector), "k": top_k})
             return cur.fetchall()
 
+    def count_book(self, book_id: str) -> int:
+        """その書籍が既に格納されているか（チャンク行数）。増分判定に使う。"""
+        with self.conn.cursor() as cur:
+            cur.execute("SELECT count(*) FROM chunks WHERE book_id = %s", (book_id,))
+            return cur.fetchone()[0]
+
+    def delete_book(self, book_id: str) -> int:
+        """その書籍のチャンクを全削除（洗い替え/再投入前のクリーンアップ）。"""
+        with self.conn.cursor() as cur:
+            cur.execute("DELETE FROM chunks WHERE book_id = %s", (book_id,))
+            return cur.rowcount
+
     def close(self) -> None:
         self.conn.close()
