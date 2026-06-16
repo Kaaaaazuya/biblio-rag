@@ -4,12 +4,12 @@
 
 | # | タイトル | 状態 |
 |---|---|---|
-| 0001 | 層分離と中間成果物（normalized/chunks を正本） | 予定（T6） |
-| 0002 | 実行基盤の使い分け（①Fargate / ②③Lambda） | 予定（T6） |
-| 0003 | メッセージングに SQS を採用 | 予定（T6） |
-| 0004 | Fargate ゼロスケール（方式A） | 予定（T6） |
-| 0005 | 開発埋め込みに Ollama を採用 | 予定（T6） |
-| 0006 | 開発ローカル完結 → 本番 AWS 移行 | 予定（T6） |
+| [0001](0001-layer-separation.md) | 層分離と中間成果物（normalized/chunks を正本） | Accepted |
+| [0002](0002-execution-platforms.md) | 実行基盤の使い分け（①Fargate / ②③Lambda） | Accepted |
+| [0003](0003-messaging-sqs.md) | メッセージングに SQS を採用 | Accepted |
+| [0004](0004-fargate-zero-scale.md) | Fargate ゼロスケール（方式A） | Accepted |
+| [0005](0005-ollama-dev-embeddings.md) | 開発埋め込みに Ollama を採用 | Accepted |
+| [0006](0006-local-to-aws.md) | 開発ローカル完結 → 本番 AWS 移行 | Accepted |
 | [0007](0007-chunking-strategy.md) | ② チャンク戦略（ヒューリスティック採用・AI は将来差し替え） | Accepted |
 
-0001〜0006 は既存 Design Doc の決定を ADR 化するもの（T6 で記述）。番号は予約済み。
+0001〜0006 は既存 Design Doc の決定を ADR 化したもの。
