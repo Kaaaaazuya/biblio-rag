@@ -21,7 +21,15 @@
       "Bash(docker ps*)",
       "Bash(docker logs*)",
       "Bash(docker images*)",
-      "Bash(ls*)"
+      "Bash(ls*)",
+      "Bash(cat*)",
+      "Bash(head*)",
+      "Bash(tail*)",
+      "Bash(jq*)",
+      "Bash(lsof*)",
+      "Bash(which*)",
+      "Bash(echo*)",
+      "Bash(curl http://localhost:*)"
     ],
     "ask": [
       "Bash(git push*)",
