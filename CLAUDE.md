@@ -7,7 +7,7 @@
 
 - **MVP を作っている**: AWS 抜き・1冊・直列スクリプトで縦串を1本通す（T1〜T5）。
 - **MVP では SQS / Lambda / Fargate / LocalStack / AWS を一切使わない。** 非同期化・AWS 化は MVP 完了後の 2nd ステージ（記録のみ）。
-- 進捗: T0 完了。次は T1（docker-compose で pgvector + Ollama、`VECTOR(1024)` スキーマ）。
+- 進捗: MVP 完了（T1〜T5。抽出→チャンク→埋め込み→pgvector→検索が縦串で通る）。次は T6（design.md/ADR 整備）。
 
 ## 技術スタック / 実行
 
