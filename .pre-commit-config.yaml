@@ -24,6 +24,18 @@ repos:
         args: ["--fix"]
       - id: ruff-format
 
+  # --- ATR: エージェント成果物(SKILL.md)の脅威スキャン（high 以上で失敗）---
+  # .claude/skills 配下の .md を変更したときだけ実行。Docker 必須・オフライン・無報告。
+  # 既知の誤検知は scripts/atr_gate.py の IGNORE で除外。詳細 docs/atr.md。
+  - repo: local
+    hooks:
+      - id: atr-skills
+        name: ATR scan (.claude/skills, high+)
+        entry: scripts/atr-precommit.sh
+        language: system
+        files: ^\.claude/skills/.*\.md$
+        pass_filenames: false
+
   # --- 基本ハイジーン + 事故防止 ---
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0
