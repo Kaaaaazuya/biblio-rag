@@ -21,6 +21,8 @@ import re
 import sys
 from pathlib import Path
 
+from .base import Chunker
+
 NORM_DIR = Path("books/normalized")
 OUT_DIR = Path("books/chunks")
 BOOKS_DIR = Path("books")
@@ -93,46 +95,55 @@ def _parse_sections(md: str) -> list[tuple[list[str], str]]:
     return sections
 
 
+class HeuristicChunker(Chunker):
+    """ADR 0007 のヒューリスティック分割（文字数 + 句点 + 見出し境界尊重）。"""
+
+    def __init__(self, size: int = DEFAULT_SIZE, overlap: int = DEFAULT_OVERLAP):
+        if overlap >= size:
+            raise ValueError("overlap は size より小さくしてください")
+        self.size = size
+        self.overlap = overlap
+
+    def chunk(self, md: str, meta: dict) -> list[dict]:
+        """meta には book_id / title / author が必須。"""
+        for key in ("book_id", "title", "author"):
+            if not meta.get(key):
+                raise ValueError(
+                    f"メタデータ '{key}' は必須です（title・author はサイドカー JSON で指定）"
+                )
+
+        records: list[dict] = []
+        idx = 0
+        for path, body in _parse_sections(md):
+            chapter = path[0] if path else None
+            section = path[1] if len(path) > 1 else None
+            prefix = " > ".join(path)
+            for piece in _split_text(body, self.size, self.overlap):
+                text = f"{prefix}\n{piece}" if prefix else piece
+                records.append(
+                    {
+                        "book_id": meta["book_id"],
+                        "chunk_index": idx,
+                        "title": meta["title"],
+                        "author": meta["author"],
+                        "chapter": chapter,
+                        "section": section,
+                        "page": None,  # MVP では未取得（列は将来の表示用に残す）
+                        "text": text,
+                    }
+                )
+                idx += 1
+        return records
+
+
 def chunk_markdown(
     md: str,
     meta: dict,
     size: int = DEFAULT_SIZE,
     overlap: int = DEFAULT_OVERLAP,
 ) -> list[dict]:
-    """Markdown をチャンク辞書のリストに変換する。
-
-    meta には book_id / title / author が必須。
-    """
-    for key in ("book_id", "title", "author"):
-        if not meta.get(key):
-            raise ValueError(
-                f"メタデータ '{key}' は必須です（title・author はサイドカー JSON で指定）"
-            )
-    if overlap >= size:
-        raise ValueError("overlap は size より小さくしてください")
-
-    records: list[dict] = []
-    idx = 0
-    for path, body in _parse_sections(md):
-        chapter = path[0] if path else None
-        section = path[1] if len(path) > 1 else None
-        prefix = " > ".join(path)
-        for piece in _split_text(body, size, overlap):
-            text = f"{prefix}\n{piece}" if prefix else piece
-            records.append(
-                {
-                    "book_id": meta["book_id"],
-                    "chunk_index": idx,
-                    "title": meta["title"],
-                    "author": meta["author"],
-                    "chapter": chapter,
-                    "section": section,
-                    "page": None,  # MVP では未取得（列は将来の表示用に残す）
-                    "text": text,
-                }
-            )
-            idx += 1
-    return records
+    """互換ヘルパー: HeuristicChunker の薄いラッパー。"""
+    return HeuristicChunker(size, overlap).chunk(md, meta)
 
 
 def _load_meta(stem: str) -> dict:
