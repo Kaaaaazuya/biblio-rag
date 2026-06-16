@@ -27,6 +27,9 @@
 ただし将来の差し替えに備え、**`Chunker` を抽象インターフェースとして定義**し、
 ヒューリスティック実装を既定とする（`Embedder` / `VectorStore` と同じ思想）。
 
+実装: `workers/chunk/base.py` の `Chunker` ABC と、既定実装 `HeuristicChunker`
+（`workers/chunk/chunk.py`）。`chunk_markdown()` はその薄いラッパー。
+
 ## 理由
 
 - ①が見出し階層という強い構造情報を既に復元しており、「見出し境界を尊重＋セクション内を
