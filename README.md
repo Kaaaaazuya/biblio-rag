@@ -76,9 +76,8 @@ PDF は **MinIO(S3) の `raw/`** にアップロードし、`title`/`author` の
 ```bash
 # 0) スタック起動 + モデル取得（上記「開発スタックの起動」を実施済みとする）
 
-# 1) PDF を S3(MinIO) にアップロード（または MinIO コンソールから）。必須メタデータも用意
-uv run python -m workers.upload your_book.pdf            # → s3://biblio/raw/your_book.pdf
-echo '{"title": "書名", "author": "著者名"}' > books/your_book.meta.json
+# 1) PDF を S3(MinIO) にアップロード。--title/--author で必須メタデータも同時作成
+uv run python -m workers.upload your_book.pdf --title "書名" --author "著者名"
 
 # 2) ① 抽出: S3(raw/) の PDF → books/normalized/*.md
 uv run python -m workers.extract

@@ -170,15 +170,32 @@ def _cli(argv: list[str]) -> int:
         print(f"Markdown が見つかりません（{NORM_DIR}/*.md または引数で指定）", file=sys.stderr)
         return 1
 
+    chunker = HeuristicChunker(args.size, args.overlap)  # size/overlap はここで検証
     OUT_DIR.mkdir(parents=True, exist_ok=True)
+    skipped: list[str] = []
     for md_path in paths:
-        meta = _load_meta(md_path.stem)
-        records = chunk_markdown(md_path.read_text(encoding="utf-8"), meta, args.size, args.overlap)
+        try:
+            meta = _load_meta(md_path.stem)
+            records = chunker.chunk(md_path.read_text(encoding="utf-8"), meta)
+        except (FileNotFoundError, ValueError) as e:
+            # メタ未整備の本は止めずにスキップ（他の本は処理する）
+            print(f"スキップ {md_path.name}: {e}", file=sys.stderr)
+            skipped.append(md_path.stem)
+            continue
         out = OUT_DIR / f"{md_path.stem}.jsonl"
         with out.open("w", encoding="utf-8") as f:
             for rec in records:
                 f.write(json.dumps(rec, ensure_ascii=False) + "\n")
         print(f"{md_path} -> {out} ({len(records)} chunks)")
+
+    if skipped:
+        print(
+            f"\nメタデータ未整備で {len(skipped)} 冊スキップ: {', '.join(skipped)}\n"
+            "  対処: books/<book_id>.meta.json を用意するか、アップロード時に\n"
+            "  `workers.upload <pdf> --title ... --author ...` を指定して再実行してください",
+            file=sys.stderr,
+        )
+        return 1
     return 0
 
 
