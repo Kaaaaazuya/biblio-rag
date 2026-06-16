@@ -155,6 +155,13 @@ uv run ruff format         # フォーマット
 uv run pytest              # テスト
 ```
 
+- エージェント成果物（`.claude/skills/**/SKILL.md` 等）の脅威スキャンに **ATR** をローカル導入。
+  npm 非依存（Docker）・外部送信ゼロ（オフライン）。詳細は [docs/atr.md](docs/atr.md)。
+
+```bash
+./scripts/atr-scan.sh      # ローカル・オフラインで SKILL.md をスキャン
+```
+
 ## ディレクトリ構成（目標）
 
 ```
