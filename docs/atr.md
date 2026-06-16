@@ -50,8 +50,20 @@ docker pull ghcr.io/agent-threat-rule/agent-threat-rules:latest   # 表示され
 # scripts/atr-scan.sh の IMAGE=...@sha256:... に反映
 ```
 
+## pre-commit ゲート（high 以上で失敗）
+
+`.claude/skills/**/*.md` を**変更したコミットのときだけ**スキャンし、**high 以上**の脅威があれば失敗する。
+
+- 実体: [scripts/atr-precommit.sh](../scripts/atr-precommit.sh)（`atr-scan.sh --json` → [scripts/atr_gate.py](../scripts/atr_gate.py) で評価）。
+- 前提: **Docker が起動**していること（スキルを変更したコミット時のみ走るので普段は無関係）。
+- 既知の誤検知は `scripts/atr_gate.py` の `IGNORE`（`"<パス接尾辞>:<rule_id>"`）で**ファイル単位**に除外。
+  - 別ファイルで同じルールが当たれば検知は生きる（ブランケット無効化はしない）。
+- 手動実行: `pre-commit run atr-skills --all-files`
+
+新たな誤検知が出てコミットが止まる場合は、内容を確認し、良性なら `IGNORE` に
+`"<該当ファイルのパス接尾辞>:<rule_id>"` を追記する。
+
 ## 今後の拡張（任意）
 
-- 重大度 `high`/`critical` のみを対象にした軽量チェックを pre-commit に追加（false positive を抑えた上で）。
 - CI（GitHub Actions の `Agent-Threat-Rule/agent-threat-rules@v3` + SARIF を Security タブへ）。
 - `atr guard` で Claude Code の実行時 hook として常時監視。
