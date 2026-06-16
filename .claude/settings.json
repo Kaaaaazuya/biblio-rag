@@ -29,6 +29,8 @@
       "Bash(lsof*)",
       "Bash(which*)",
       "Bash(echo*)",
+      "Bash(grep*)",
+      "Bash(tr *)",
       "Bash(curl http://localhost:*)"
     ],
     "ask": [
