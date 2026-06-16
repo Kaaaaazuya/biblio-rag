@@ -14,6 +14,19 @@ OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
 EMBED_MODEL = os.getenv("EMBED_MODEL", "bge-m3")
 EMBED_DIM = int(os.getenv("EMBED_DIM", "1024"))
 
+# オブジェクトストレージ（開発: MinIO / 本番: AWS S3）
+# 本番は S3_ENDPOINT_URL を空にすると boto3 が AWS S3 を指す。
+S3_ENDPOINT_URL = os.getenv("S3_ENDPOINT_URL") or None
+S3_BUCKET = os.getenv("S3_BUCKET", "biblio")
+AWS_REGION = os.getenv("AWS_REGION", "ap-northeast-1")
+
+
+def s3_client():
+    """boto3 S3 クライアント。資格情報は環境変数（.env）から自動解決。"""
+    import boto3
+
+    return boto3.client("s3", endpoint_url=S3_ENDPOINT_URL, region_name=AWS_REGION)
+
 
 def database_url() -> str:
     """DATABASE_URL があればそれを、無ければ POSTGRES_* から組み立てる。"""

@@ -71,3 +71,9 @@ def test_reading_order(md):
     # 章の出現順が保たれている
     assert md.index("第一章") < md.index("第二章")
     assert md.index("1.1 目的") < md.index("2.1 読み順")
+
+
+def test_extract_accepts_bytes():
+    # S3 から取得した PDF バイト列を直接渡せる（MinIO 経由のパス）
+    md = extract_pdf_to_markdown(_ensure_fixture().read_bytes())
+    assert "# RAG 取り込みパイプライン設計ノート" in md

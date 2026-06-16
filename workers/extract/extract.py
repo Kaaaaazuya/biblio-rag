@@ -7,8 +7,8 @@
   - 見出し検出: 最頻フォントサイズ=本文、それより大きい=見出しの相対判定。
     フォントの大きい順にレベル付け（# / ## / ###）。「第◯章」パターンを併用。
 
-CLI: uv run python -m workers.extract            # books/raw/*.pdf → books/normalized/*.md
-     uv run python -m workers.extract a.pdf b.pdf
+CLI: uv run python -m workers.extract            # S3(raw/) の PDF → books/normalized/*.md
+     uv run python -m workers.extract a.pdf b.pdf # ローカル PDF を直接指定も可
 """
 
 from __future__ import annotations
@@ -20,7 +20,6 @@ from pathlib import Path
 
 import fitz  # PyMuPDF
 
-RAW_DIR = Path("books/raw")
 OUT_DIR = Path("books/normalized")
 
 # ヘッダ/フッタ帯（ページ高に対する割合）
@@ -116,9 +115,13 @@ def _modal_spacing(lines: list[_Line], body: float) -> float:
     return deltas.most_common(1)[0][0] if deltas else body * 1.7
 
 
-def extract_pdf_to_markdown(pdf_path: str | Path) -> str:
-    """PDF を構造つき Markdown に変換して返す。"""
-    with fitz.open(pdf_path) as doc:
+def extract_pdf_to_markdown(src: str | Path | bytes) -> str:
+    """PDF（ファイルパス or バイト列）を構造つき Markdown に変換して返す。"""
+    if isinstance(src, bytes | bytearray):
+        doc = fitz.open(stream=bytes(src), filetype="pdf")
+    else:
+        doc = fitz.open(src)
+    with doc:
         lines, heights = _collect_lines(doc)
     lines = _strip_header_footer(lines, heights)
     if not lines:
@@ -159,17 +162,36 @@ def extract_pdf_to_markdown(pdf_path: str | Path) -> str:
     return "\n\n".join(blocks) + "\n"
 
 
+def _write_md(stem: str, md: str, source: str) -> None:
+    out = OUT_DIR / f"{stem}.md"
+    out.write_text(md, encoding="utf-8")
+    print(f"{source} -> {out} ({len(md)} chars)")
+
+
 def _cli(argv: list[str]) -> int:
-    paths = [Path(a) for a in argv] if argv else sorted(RAW_DIR.glob("*.pdf"))
-    if not paths:
-        print(f"PDF が見つかりません（{RAW_DIR}/*.pdf または引数で指定）", file=sys.stderr)
-        return 1
     OUT_DIR.mkdir(parents=True, exist_ok=True)
-    for pdf in paths:
-        md = extract_pdf_to_markdown(pdf)
-        out = OUT_DIR / f"{pdf.stem}.md"
-        out.write_text(md, encoding="utf-8")
-        print(f"{pdf} -> {out} ({len(md)} chars)")
+    if argv:
+        # ローカル PDF を直接指定（開発・テスト用の利便）
+        for arg in argv:
+            pdf = Path(arg)
+            _write_md(pdf.stem, extract_pdf_to_markdown(pdf), str(pdf))
+        return 0
+
+    # 既定: オブジェクトストレージ（S3/MinIO）の raw/ から取得
+    from workers.storage import ObjectStore
+
+    store = ObjectStore()
+    keys = store.list_pdfs()
+    if not keys:
+        print(
+            f"S3 に PDF がありません（{store.bucket}/raw/）。"
+            "workers.upload で投入するか MinIO コンソールからアップロードしてください",
+            file=sys.stderr,
+        )
+        return 1
+    for key in keys:
+        md = extract_pdf_to_markdown(store.get_bytes(key))
+        _write_md(Path(key).stem, md, f"s3://{store.bucket}/{key}")
     return 0
 
 
