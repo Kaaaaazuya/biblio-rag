@@ -5,7 +5,7 @@
 
 - **開発**: ローカル完結（無料）— Ollama `bge-m3` + Docker pgvector
 - **本番**: AWS（ECS Fargate + Lambda + SQS + Aurora pgvector + Bedrock Titan V2）※2nd ステージ
-- 詳細設計は [`docs/design.md`](docs/design.md)（配置予定）を参照
+- 詳細設計は [`docs/design.md`](docs/design.md)、意思決定の経緯は [`docs/adr/`](docs/adr/) を参照
 
 > **現在のステータス: MVP 完了（T1〜T5）。** ローカルで PDF→抽出→チャンク→埋め込み→pgvector→検索の縦串が通る。非同期化・AWS 化は 2nd ステージ。
 

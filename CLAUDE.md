@@ -1,7 +1,7 @@
 # CLAUDE.md — biblio-rag 開発の常時ルール
 
 日本語書籍の RAG **取り込みパイプライン**（PDF→抽出→チャンク→埋め込み→pgvector→最小検索）。
-回答生成 LLM はスコープ外。詳細は [README.md](README.md) / [docs/design.md](docs/design.md)（配置予定）。
+回答生成 LLM はスコープ外。詳細は [README.md](README.md) / [docs/design.md](docs/design.md) / [docs/adr/](docs/adr/)。
 
 ## 現在のステージ
 
