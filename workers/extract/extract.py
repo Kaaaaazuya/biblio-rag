@@ -13,6 +13,7 @@ CLI: uv run python -m workers.extract            # S3(raw/) の PDF → books/no
 
 from __future__ import annotations
 
+import argparse
 import re
 import sys
 from collections import Counter
@@ -169,10 +170,15 @@ def _write_md(stem: str, md: str, source: str) -> None:
 
 
 def _cli(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(description="① 抽出: PDF → 構造つき Markdown")
+    parser.add_argument("paths", nargs="*", help="ローカル PDF（省略時は S3 の raw/ を処理）")
+    parser.add_argument("--force", action="store_true", help="処理済み(.md)も再生成（洗い替え）")
+    args = parser.parse_args(argv)
     OUT_DIR.mkdir(parents=True, exist_ok=True)
-    if argv:
-        # ローカル PDF を直接指定（開発・テスト用の利便）
-        for arg in argv:
+
+    if args.paths:
+        # ローカル PDF を直接指定（開発・テスト用の利便。常に処理する）
+        for arg in args.paths:
             pdf = Path(arg)
             _write_md(pdf.stem, extract_pdf_to_markdown(pdf), str(pdf))
         return 0
@@ -190,8 +196,14 @@ def _cli(argv: list[str]) -> int:
         )
         return 1
     for key in keys:
+        stem = Path(key).stem
+        out = OUT_DIR / f"{stem}.md"
+        # 既定: 既存の .md はスキップ（--force で洗い替え）
+        if out.exists() and not args.force:
+            print(f"スキップ（既存）: {out.name}")
+            continue
         md = extract_pdf_to_markdown(store.get_bytes(key))
-        _write_md(Path(key).stem, md, f"s3://{store.bucket}/{key}")
+        _write_md(stem, md, f"s3://{store.bucket}/{key}")
     return 0
 
 

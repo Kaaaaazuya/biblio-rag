@@ -163,8 +163,10 @@ def _cli(argv: list[str]) -> int:
     parser.add_argument("paths", nargs="*", help="対象 .md（省略時は books/normalized/*.md）")
     parser.add_argument("--size", type=int, default=DEFAULT_SIZE)
     parser.add_argument("--overlap", type=int, default=DEFAULT_OVERLAP)
+    parser.add_argument("--force", action="store_true", help="処理済み(.jsonl)も再生成（洗い替え）")
     args = parser.parse_args(argv)
 
+    is_batch = not args.paths
     paths = [Path(p) for p in args.paths] if args.paths else sorted(NORM_DIR.glob("*.md"))
     if not paths:
         print(f"Markdown が見つかりません（{NORM_DIR}/*.md または引数で指定）", file=sys.stderr)
@@ -174,6 +176,11 @@ def _cli(argv: list[str]) -> int:
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     skipped: list[str] = []
     for md_path in paths:
+        out = OUT_DIR / f"{md_path.stem}.jsonl"
+        # 既定: 一括実行で既存の .jsonl はスキップ（--force で洗い替え）
+        if is_batch and out.exists() and not args.force:
+            print(f"スキップ（既存）: {out.name}")
+            continue
         try:
             meta = _load_meta(md_path.stem)
             records = chunker.chunk(md_path.read_text(encoding="utf-8"), meta)
@@ -182,7 +189,6 @@ def _cli(argv: list[str]) -> int:
             print(f"スキップ {md_path.name}: {e}", file=sys.stderr)
             skipped.append(md_path.stem)
             continue
-        out = OUT_DIR / f"{md_path.stem}.jsonl"
         with out.open("w", encoding="utf-8") as f:
             for rec in records:
                 f.write(json.dumps(rec, ensure_ascii=False) + "\n")

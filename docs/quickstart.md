@@ -98,6 +98,7 @@ uv run python -m workers.search "調べたいこと" --top-k 5
 ```
 
 > PDF は S3(MinIO)。`books/`（normalized/chunks/meta）は `.gitignore` 済みでコミットされない（著作権保護）。
+> **増分実行**: 再実行すると処理済みはスキップされる。作り直したいときは各コマンドに `--force`（洗い替え）。
 > チャンクサイズは可変: `uv run python -m workers.chunk --size 600 --overlap 100`。
 
 ---
