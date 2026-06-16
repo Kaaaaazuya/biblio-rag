@@ -118,8 +118,8 @@ def _modal_spacing(lines: list[_Line], body: float) -> float:
 
 def extract_pdf_to_markdown(pdf_path: str | Path) -> str:
     """PDF を構造つき Markdown に変換して返す。"""
-    doc = fitz.open(pdf_path)
-    lines, heights = _collect_lines(doc)
+    with fitz.open(pdf_path) as doc:
+        lines, heights = _collect_lines(doc)
     lines = _strip_header_footer(lines, heights)
     if not lines:
         return ""

@@ -19,8 +19,9 @@ def database_url() -> str:
     """DATABASE_URL があればそれを、無ければ POSTGRES_* から組み立てる。"""
     if url := os.getenv("DATABASE_URL"):
         return url
+    # 既定値は docker-compose / .env.example と一致させる（.env が無い場合の罠を避ける）
     user = os.getenv("POSTGRES_USER", "biblio")
-    password = os.getenv("POSTGRES_PASSWORD", "biblio")
+    password = os.getenv("POSTGRES_PASSWORD", "changeme_local_only")
     host = os.getenv("POSTGRES_HOST", "localhost")
     port = os.getenv("POSTGRES_PORT", "5432")
     db = os.getenv("POSTGRES_DB", "biblio")

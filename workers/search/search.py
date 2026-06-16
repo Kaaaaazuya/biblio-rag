@@ -12,21 +12,30 @@ from workers import config
 from workers.embed import OllamaEmbedder, PgVectorStore
 
 
+def _crumbs(rec: dict) -> str:
+    return " > ".join(c for c in (rec.get("chapter"), rec.get("section")) if c)
+
+
+def _body(rec: dict) -> str:
+    """本文頭に付与された見出し prefix を、それが prefix のときだけ取り除く。"""
+    text = rec["text"]
+    crumbs = _crumbs(rec)
+    first, sep, rest = text.partition("\n")
+    return rest if (crumbs and sep and first == crumbs) else text
+
+
 def _snippet(text: str, length: int = 70) -> str:
-    """本文頭の見出し prefix を除いた本文の冒頭を返す。"""
-    body = text.split("\n", 1)[-1] if "\n" in text else text
-    body = body.strip()
-    return body[:length] + ("…" if len(body) > length else "")
+    text = text.strip()
+    return text[:length] + ("…" if len(text) > length else "")
 
 
 def format_result(rank: int, rec: dict) -> str:
     """1 件の検索結果を出典つきの文字列に整形する。"""
-    crumbs = " > ".join(c for c in (rec.get("chapter"), rec.get("section")) if c)
     page = f" p.{rec['page']}" if rec.get("page") is not None else ""
-    source = " / ".join(s for s in (rec.get("title"), crumbs) if s)
+    source = " / ".join(s for s in (rec.get("title"), _crumbs(rec)) if s)
     score = rec.get("score")
     score_str = f"{score:.3f}" if isinstance(score, int | float) else "-"
-    return f"[{rank}] score={score_str}  {source}{page}\n    {_snippet(rec['text'])}"
+    return f"[{rank}] score={score_str}  {source}{page}\n    {_snippet(_body(rec))}"
 
 
 def _cli(argv: list[str]) -> int:

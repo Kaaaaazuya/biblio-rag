@@ -1,12 +1,19 @@
 """T5 検索の表示整形のユニットテスト（ライブサービス不要）。"""
 
-from workers.search.search import _snippet, format_result
+from workers.search.search import _body, format_result
 
 
-def test_snippet_strips_heading_prefix():
-    text = "第一章 設計 > 1.1 目的\n本文のはじまりである。続きがある。"
-    assert _snippet(text).startswith("本文のはじまりである")
-    assert ">" not in _snippet(text)  # 見出し prefix は除かれる
+def test_body_strips_only_actual_heading_prefix():
+    # prefix がある場合は取り除く
+    with_prefix = {
+        "chapter": "第一章 設計",
+        "section": "1.1 目的",
+        "text": "第一章 設計 > 1.1 目的\n本文のはじまりである。",
+    }
+    assert _body(with_prefix) == "本文のはじまりである。"
+    # prefix が無い（見出し外）本文は1行目を落とさない
+    no_prefix = {"chapter": None, "section": None, "text": "先頭行である。\n次の行。"}
+    assert _body(no_prefix) == "先頭行である。\n次の行。"
 
 
 def test_format_result_includes_source_and_score():
