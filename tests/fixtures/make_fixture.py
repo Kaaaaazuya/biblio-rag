@@ -35,8 +35,12 @@ OUT = Path(__file__).parent / "sample_book.pdf"
 # フォントサイズに明確な差をつけ、相対判定（最頻=本文・大=見出し）を検証可能にする
 STYLES = {
     "title": ParagraphStyle("title", fontName=FONT, fontSize=24, leading=30, spaceAfter=20),
-    "h1": ParagraphStyle("h1", fontName=FONT, fontSize=18, leading=24, spaceBefore=16, spaceAfter=10),
-    "h2": ParagraphStyle("h2", fontName=FONT, fontSize=14, leading=20, spaceBefore=10, spaceAfter=6),
+    "h1": ParagraphStyle(
+        "h1", fontName=FONT, fontSize=18, leading=24, spaceBefore=16, spaceAfter=10
+    ),
+    "h2": ParagraphStyle(
+        "h2", fontName=FONT, fontSize=14, leading=20, spaceBefore=10, spaceAfter=6
+    ),
     "body": ParagraphStyle("body", fontName=FONT, fontSize=10.5, leading=18, spaceAfter=10),
 }
 
@@ -45,35 +49,47 @@ CONTENT = [
     ("title", BOOK_TITLE),
     ("h1", "第一章 設計の前提"),
     ("h2", "1.1 目的とスコープ"),
-    ("body",
-     "本書はテキスト埋め込み済みの日本語書籍を入力として、検索対象となるベクトル"
-     "インデックスを構築する取り込みパイプラインの設計をまとめたものである。"
-     "対象は抽出から格納までであり、回答生成そのものはここでは扱わない。"
-     "各層は中間成果物をファイルとして残し、後段の再実行コストを最小化する。"),
-    ("body",
-     "層を分離する理由は明快である。抽出ロジックの変更は最も重い処理のやり直しを"
-     "招くため、抽出結果を正本として保存しておけば、チャンク分割や埋め込みの調整は"
-     "その正本を読み直すだけで済む。これにより試行錯誤の速度が大きく向上する。"),
+    (
+        "body",
+        "本書はテキスト埋め込み済みの日本語書籍を入力として、検索対象となるベクトル"
+        "インデックスを構築する取り込みパイプラインの設計をまとめたものである。"
+        "対象は抽出から格納までであり、回答生成そのものはここでは扱わない。"
+        "各層は中間成果物をファイルとして残し、後段の再実行コストを最小化する。",
+    ),
+    (
+        "body",
+        "層を分離する理由は明快である。抽出ロジックの変更は最も重い処理のやり直しを"
+        "招くため、抽出結果を正本として保存しておけば、チャンク分割や埋め込みの調整は"
+        "その正本を読み直すだけで済む。これにより試行錯誤の速度が大きく向上する。",
+    ),
     ("h2", "1.2 実行基盤の方針"),
-    ("body",
-     "開発はローカルで完結させ、本番はクラウドへ移行する二段構えとする。"
-     "両環境で中間成果物の形式を共通化することで、移行時の差分を埋め込みモデルと"
-     "接続先の二点だけに閉じ込めることができる。スキーマや分割ロジックは共通である。"),
+    (
+        "body",
+        "開発はローカルで完結させ、本番はクラウドへ移行する二段構えとする。"
+        "両環境で中間成果物の形式を共通化することで、移行時の差分を埋め込みモデルと"
+        "接続先の二点だけに閉じ込めることができる。スキーマや分割ロジックは共通である。",
+    ),
     ("h1", "第二章 抽出の詳細"),
     ("h2", "2.1 読み順の安定化"),
-    ("body",
-     "段組みや脚注を含む紙面では、素朴な抽出では読み順が乱れることがある。"
-     "ブロック単位で取得し、座標に基づいて整列させることで、人間が読む順序に近い"
-     "テキスト列を得る。これが後段のチャンク分割の品質を左右する。"),
-    ("body",
-     "見出しの検出には、紙面で最も多く使われるフォントサイズを本文とみなし、"
-     "それより大きいものを見出しとする相対判定を用いる。加えて、章を表す定型の"
-     "表現を併用することで、フォント情報が乏しい場合でも構造を復元しやすくなる。"),
+    (
+        "body",
+        "段組みや脚注を含む紙面では、素朴な抽出では読み順が乱れることがある。"
+        "ブロック単位で取得し、座標に基づいて整列させることで、人間が読む順序に近い"
+        "テキスト列を得る。これが後段のチャンク分割の品質を左右する。",
+    ),
+    (
+        "body",
+        "見出しの検出には、紙面で最も多く使われるフォントサイズを本文とみなし、"
+        "それより大きいものを見出しとする相対判定を用いる。加えて、章を表す定型の"
+        "表現を併用することで、フォント情報が乏しい場合でも構造を復元しやすくなる。",
+    ),
     ("h2", "2.2 正規化"),
-    ("body",
-     "段落の途中で入った改行は結合し、空行を段落の区切りとして扱う。"
-     "ページ番号や繰り返し現れる書名などのヘッダ・フッタは、位置とパターンに"
-     "基づいて取り除く。こうして得た整形済みテキストを正本として保存する。"),
+    (
+        "body",
+        "段落の途中で入った改行は結合し、空行を段落の区切りとして扱う。"
+        "ページ番号や繰り返し現れる書名などのヘッダ・フッタは、位置とパターンに"
+        "基づいて取り除く。こうして得た整形済みテキストを正本として保存する。",
+    ),
 ]
 
 
@@ -85,13 +101,17 @@ def build() -> Path:
         canvas.saveState()
         canvas.setFont(FONT, 8)
         w, h = A5
-        canvas.drawCentredString(w / 2, h - 10 * mm, BOOK_TITLE)          # ヘッダ
-        canvas.drawCentredString(w / 2, 8 * mm, f"- {doc.page} -")        # フッタ(ページ番号)
+        canvas.drawCentredString(w / 2, h - 10 * mm, BOOK_TITLE)  # ヘッダ
+        canvas.drawCentredString(w / 2, 8 * mm, f"- {doc.page} -")  # フッタ(ページ番号)
         canvas.restoreState()
 
     doc = BaseDocTemplate(
-        str(OUT), pagesize=A5,
-        leftMargin=18 * mm, rightMargin=18 * mm, topMargin=20 * mm, bottomMargin=18 * mm,
+        str(OUT),
+        pagesize=A5,
+        leftMargin=18 * mm,
+        rightMargin=18 * mm,
+        topMargin=20 * mm,
+        bottomMargin=18 * mm,
     )
     frame = Frame(doc.leftMargin, doc.bottomMargin, doc.width, doc.height, id="main")
     doc.addPageTemplates([PageTemplate(id="t", frames=[frame], onPage=on_page)])
