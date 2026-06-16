@@ -84,6 +84,10 @@ curl http://localhost:11434/api/embed -d '{"model":"bge-m3","input":"テスト"}
 
 ---
 
+## 開発ルール
+
+- コミットメッセージは **Conventional Commits** に統一。規約は [`docs/commit-convention.md`](docs/commit-convention.md)、実作業は `/commit` スキルが支援する。
+
 ## ディレクトリ構成（目標）
 
 ```
@@ -99,8 +103,9 @@ infra/db/         # pgvector スキーマ（開発/本番共通）
 docker/           # docker-compose.yml（postgres + Ollama）
 tests/fixtures/   # 著作権フリーのテスト用データ（コミット可）
 docs/
-  design.md       # 確定した設計
-  adr/            # アーキテクチャ決定記録
+  design.md           # 確定した設計
+  commit-convention.md # コミットメッセージ規約（正本）
+  adr/                # アーキテクチャ決定記録
 ```
 
 ## ライセンス
