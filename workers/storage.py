@@ -7,11 +7,16 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
+from urllib.parse import unquote
 
 from workers import config
 
 RAW_PREFIX = "raw/"
+
+# S3 object metadata に載せる書誌情報のキー（値は US-ASCII 制約のため URL エンコード）。
+_META_KEYS = ("title", "author")
 
 
 class ObjectStore:
@@ -34,3 +39,27 @@ class ObjectStore:
 
     def put_file(self, local_path: str | Path, key: str) -> None:
         self.client.upload_file(str(local_path), self.bucket, key)
+
+    def put_bytes(self, key: str, data: bytes, metadata: dict[str, str] | None = None) -> None:
+        kwargs = {"Bucket": self.bucket, "Key": key, "Body": data}
+        if metadata:
+            kwargs["Metadata"] = metadata
+        self.client.put_object(**kwargs)
+
+    def put_text(self, key: str, text: str) -> None:
+        self.put_bytes(key, text.encode("utf-8"))
+
+    def get_text(self, key: str) -> str:
+        return self.get_bytes(key).decode("utf-8")
+
+    def put_jsonl(self, key: str, records: list[dict]) -> None:
+        body = "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in records)
+        self.put_text(key, body)
+
+    def load_jsonl(self, key: str) -> list[dict]:
+        return [json.loads(line) for line in self.get_text(key).splitlines() if line.strip()]
+
+    def get_meta(self, key: str) -> dict[str, str]:
+        """raw PDF の S3 object metadata から title/author を URL デコードして返す。"""
+        raw = self.client.head_object(Bucket=self.bucket, Key=key).get("Metadata", {})
+        return {k: unquote(raw[k]) for k in _META_KEYS if k in raw}
