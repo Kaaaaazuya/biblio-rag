@@ -51,21 +51,42 @@
 ## 次の候補（MVP 範囲の磨き込み・優先度順は要相談）
 
 - [x] **実書籍での通し評価**：クリーンコードクックブックで実施（上「通し検証の結果」参照）。
+- [x] **検索精度のチューニング**：チャンク長/オーバーラップのスイープ完了（300/60・500/80・800/120）。**800/120 を新デフォルトに採用**（ハードクエリ MRR: 0.556 → 0.694、+24%）。`scripts/eval_search.py` 追加済み。Reranker は見送り。
 - [ ] **コードブロックの扱い**：抽出/チャンクでコードが行途中分割される問題（通し検証で発覚）。
-- [ ] **検索精度のチューニング**：top_k、チャンク長/オーバーラップ、見出し前後の扱い、Reranker 要否。
 - [ ] **page 付与の検討**：① がページ境界を中間データに残す拡張（現状 `page=null`、列は保持済み）。
 - [ ] **WebUI の実利用確認**：アップロード → extract が拾う導線（必要なら自動トリガ）。※ブラウザ→MinIO は webui E2E で担保済み。
 - [ ] （任意）normalized/chunks も S3 へ寄せるか検討（現状は raw=S3 / 中間=ローカル FS）。
 
-## 2nd ステージ（AWS 化）— 記録のみ・MVP 完了後に着手
+## 2nd ステージ（AWS 化）— 設計確定済み・実装待ち
 
-> MVP では SQS / Lambda / Fargate / LocalStack / AWS を一切使わない方針（CLAUDE.md）。
+> MVP では SQS / Lambda / LocalStack / AWS を一切使わない方針（CLAUDE.md）。設計方針は [ADR 0011](docs/adr/0011-aws-serverless-pipeline.md)。
 
-- [ ] AWS リソース作成（SQS×3+DLQ×3 / S3 / Fargate / Lambda×2 / Aurora pgvector / Secrets Manager）。
-- [ ] 設定切替：`Embedder` → `BedrockEmbedder`（Titan V2）、エンドポイントを本番へ（環境変数制御）。
-- [ ] `chunks/*.jsonl` を正本に **再埋め込み** → Aurora pgvector へ投入（意味空間が変わるため必須）。
-- [ ] 本番モデルでの検索精度を再評価。
-- 経緯：ADR [0002](docs/adr/0002-execution-platforms.md) / [0003](docs/adr/0003-messaging-sqs.md) / [0004](docs/adr/0004-fargate-zero-scale.md) / [0006](docs/adr/0006-local-to-aws.md)。
+### インフラ構築
+- [ ] **Aurora Serverless v2 セットアップ**：PostgreSQL 互換・0 ACU 最小・pgvector 拡張有効化。
+- [ ] **RDS Proxy セットアップ**：Lambda → Aurora の接続プール管理。
+- [ ] **SQS キュー × 3 + DLQ × 3**：raw / norm / chunks キュー。Visibility Timeout は各 Lambda タイムアウト × 6。
+- [ ] **DLQ アラート**：DLQ 到達時に EventBridge → SNS 通知。
+- [ ] **S3 バケット**：raw / normalized / chunks プレフィックス。ライフサイクルポリシー（normalized・chunks は 30 日後削除）。
+- [ ] **CloudFront + S3 static**：WebUI 静的配信。
+- [ ] **Secrets Manager**：`DATABASE_URL`・AWS 認証情報を管理。
+
+### Lambda 実装
+- [ ] **λ-extract**（コンテナイメージ）：S3 から PDF 取得 → 抽出 → normalized/ に書き出し → SQS(norm) 送信。
+- [ ] **λ-chunk**（zip）：normalized/ から MD 取得 → チャンク → chunks/ に書き出し → SQS(chunks) 送信。
+- [ ] **λ-embed**（zip）：chunks/ から JSONL 取得 → Bedrock 埋め込み → Aurora upsert（**トランザクション内で DELETE + INSERT**・autocommit 無効化）。
+- [ ] **λ-presign**（zip）：API Gateway POST /presign → presigned URL 発行。
+- [ ] **λ-search**（zip）：API Gateway GET /search → クエリ埋め込み → pgvector 検索 → JSON 返却。
+
+### スキーマ・モデル
+- [ ] **`embed_model` カラム追加**：`ALTER TABLE chunks ADD COLUMN embed_model TEXT NOT NULL DEFAULT 'bge-m3';`。マイグレーション SQL を `infra/db/` に追加。
+- [ ] **`BedrockEmbedder` 実装**：Titan Embeddings V2（1024 次元）。環境変数 `EMBED_BACKEND=bedrock` で切替。
+- [ ] **全書籍の再埋め込み**：`chunks/*.jsonl` を正本に Bedrock で再埋め込み → Aurora へ投入（意味空間が変わるため必須）。
+
+### 検証
+- [ ] **本番モデルでの検索精度評価**：`scripts/eval_search.py` で Titan V2 の MRR を計測。ローカル（bge-m3）の 0.694 と比較。
+- [ ] **RDS Proxy コスト計測**：実際の ACU × $0.015/h を 1 ヶ月計測。Aurora + Proxy の合計が $23 超なら Neon 移行を検討。
+
+- 経緯：ADR [0002](docs/adr/0002-execution-platforms.md) / [0003](docs/adr/0003-messaging-sqs.md) / [0004](docs/adr/0004-fargate-zero-scale.md) / [0006](docs/adr/0006-local-to-aws.md) / [0011](docs/adr/0011-aws-serverless-pipeline.md)。
 
 ## 既知の限界（MVP / design.md §既知の限界）
 
