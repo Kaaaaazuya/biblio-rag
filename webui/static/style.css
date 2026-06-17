@@ -1,47 +1,87 @@
 :root {
   color-scheme: light dark;
   --accent: #00c896;
-  --border: rgba(128, 128, 128, 0.3);
+  --accent-hover: #00a87e;
+  --error: #e5534b;
 }
-* {
-  box-sizing: border-box;
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg-page:  #f2f2f7;
+    --bg-card:  #ffffff;
+    --bg-input: #f9f9f9;
+    --text-main: #1c1c1e;
+    --text-sub:  #6c6c70;
+    --border:    #c6c6c8;
+    --shadow: 0 1px 3px rgba(0,0,0,.08), 0 4px 16px rgba(0,0,0,.05);
+  }
 }
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg-page:  #000000;
+    --bg-card:  #1c1c1e;
+    --bg-input: #2c2c2e;
+    --text-main: #f2f2f7;
+    --text-sub:  #98989d;
+    --border:    #3a3a3c;
+    --shadow: 0 1px 3px rgba(0,0,0,.4), 0 4px 20px rgba(0,0,0,.3);
+  }
+}
+
+* { box-sizing: border-box; }
+
 body {
-  font-family: system-ui, -apple-system, "Hiragino Sans", sans-serif;
+  font-family: -apple-system, "Hiragino Sans", system-ui, sans-serif;
   margin: 0;
   min-height: 100vh;
   display: grid;
   place-items: center;
   padding: 24px;
-  background: Canvas;
-  color: CanvasText;
+  background: var(--bg-page);
+  color: var(--text-main);
 }
+
 .card {
   width: 100%;
   max-width: 480px;
+  background: var(--bg-card);
   border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 28px;
+  border-radius: 16px;
+  padding: 32px;
+  box-shadow: var(--shadow);
 }
+
 h1 {
-  margin: 0 0 8px;
+  margin: 0 0 6px;
   font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -.3px;
 }
+
 .muted {
-  color: gray;
+  color: var(--text-sub);
   font-size: 13px;
   line-height: 1.6;
+  margin: 0;
 }
+
 code {
-  font-family: ui-monospace, monospace;
-  font-size: 0.9em;
+  font-family: ui-monospace, "SF Mono", monospace;
+  font-size: .85em;
+  background: var(--bg-input);
+  padding: 1px 5px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
 }
+
 form {
   display: flex;
   flex-direction: column;
-  gap: 14px;
-  margin-top: 20px;
+  gap: 16px;
+  margin-top: 24px;
 }
+
 label {
   display: flex;
   flex-direction: column;
@@ -49,41 +89,71 @@ label {
   font-size: 13px;
   font-weight: 600;
 }
-input {
-  padding: 9px 10px;
+
+input[type="file"],
+input[type="text"] {
+  padding: 10px 12px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 10px;
   font-size: 14px;
-  background: Canvas;
-  color: CanvasText;
+  background: var(--bg-input);
+  color: var(--text-main);
+  outline: none;
+  transition: border-color .15s, box-shadow .15s;
 }
-button {
+
+input[type="file"]:focus,
+input[type="text"]:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(0,200,150,.15);
+}
+
+input[type="file"] { cursor: pointer; }
+
+button[type="submit"] {
   margin-top: 4px;
-  padding: 11px;
-  border: 0;
-  border-radius: 8px;
+  padding: 12px;
+  border: none;
+  border-radius: 10px;
   background: var(--accent);
-  color: #06241c;
+  color: #04201a;
   font-weight: 700;
-  font-size: 14px;
+  font-size: 15px;
   cursor: pointer;
+  transition: background .15s, opacity .15s;
 }
-button:disabled {
-  opacity: 0.6;
+
+button[type="submit"]:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+
+button[type="submit"]:disabled {
+  opacity: .55;
   cursor: not-allowed;
 }
+
+/* Progress bar（ブラウザ差異を吸収） */
 progress {
   width: 100%;
-  margin-top: 16px;
+  height: 4px;
+  margin-top: 20px;
+  border: none;
+  border-radius: 4px;
+  overflow: hidden;
+  background: var(--border);
+  -webkit-appearance: none;
+  appearance: none;
 }
+progress::-webkit-progress-bar   { background: var(--border); }
+progress::-webkit-progress-value { background: var(--accent); transition: width .3s ease; }
+progress::-moz-progress-bar      { background: var(--accent); }
+
 .status {
-  margin-top: 14px;
+  margin-top: 16px;
   font-size: 13px;
-  min-height: 1.2em;
+  min-height: 1.4em;
+  color: var(--text-sub);
+  line-height: 1.5;
 }
-.status.ok {
-  color: var(--accent);
-}
-.status.err {
-  color: #e5534b;
-}
+.status.ok  { color: var(--accent); font-weight: 600; }
+.status.err { color: var(--error);  font-weight: 600; }
