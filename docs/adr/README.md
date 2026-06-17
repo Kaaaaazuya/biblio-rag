@@ -13,5 +13,6 @@
 | [0007](0007-chunking-strategy.md) | ② チャンク戦略（ヒューリスティック採用・AI は将来差し替え） | Accepted |
 | [0008](0008-object-storage-minio.md) | raw PDF をオブジェクトストレージに（開発 MinIO / 本番 S3） | Accepted |
 | [0009](0009-claude-hooks-and-subagents.md) | フックを最小導入・チェック系は code-review / pre-commit に集約 | Accepted |
+| [0010](0010-e2e-testing-strategy.md) | E2E テスト戦略（パイプライン=pytest / WebUI=Playwright） | Accepted |
 
 0001〜0006 は既存 Design Doc の決定を ADR 化したもの。
