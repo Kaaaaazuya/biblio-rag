@@ -31,6 +31,7 @@ DEFAULT_SIZE = 800
 DEFAULT_OVERLAP = 120
 
 _HEADING_RE = re.compile(r"^(#{1,6})\s+(.*)$")
+_PAGE_RE = re.compile(r"^<!-- page:(\d+) -->$")
 
 
 def _split_text(text: str, size: int, overlap: int) -> list[str]:
@@ -61,26 +62,33 @@ def _split_text(text: str, size: int, overlap: int) -> list[str]:
     return chunks
 
 
-def _parse_sections(md: str) -> list[tuple[list[str], str]]:
-    """Markdown を (見出しパス, 本文) のセクション列に分解する。
+def _parse_sections(md: str) -> list[tuple[list[str], str, int | None]]:
+    """Markdown を (見出しパス, 本文, 開始ページ) のセクション列に分解する。
 
     見出しパスは書名(レベル1)を除く章・節（レベル2以降）の並び。
+    開始ページは <!-- page:N --> マーカーから取得（無ければ None）。
     """
-    sections: list[tuple[list[str], str]] = []
+    sections: list[tuple[list[str], str, int | None]] = []
     stack: dict[int, str] = {}
     body: list[str] = []
+    cur_page: int | None = None
+    section_page: int | None = None  # 現セクションの開始ページ
 
     def flush() -> None:
         if body:
             text = "\n".join(body).strip()
             if text:
                 path = [stack[lv] for lv in sorted(stack) if lv >= 2]
-                sections.append((path, text))
+                sections.append((path, text, section_page))
             body.clear()
 
     for raw in md.splitlines():
         line = raw.strip()
         if not line:
+            continue
+        m_page = _PAGE_RE.match(line)
+        if m_page:
+            cur_page = int(m_page.group(1))
             continue
         m = _HEADING_RE.match(line)
         if m:
@@ -89,7 +97,10 @@ def _parse_sections(md: str) -> list[tuple[list[str], str]]:
             stack[level] = m.group(2).strip()
             for deeper in [lv for lv in stack if lv > level]:
                 del stack[deeper]
+            section_page = cur_page
         else:
+            if not body:
+                section_page = cur_page  # 本文段落の先頭でページを確定
             body.append(line)
     flush()
     return sections
@@ -114,7 +125,7 @@ class HeuristicChunker(Chunker):
 
         records: list[dict] = []
         idx = 0
-        for path, body in _parse_sections(md):
+        for path, body, page in _parse_sections(md):
             chapter = path[0] if path else None
             section = path[1] if len(path) > 1 else None
             prefix = " > ".join(path)
@@ -128,7 +139,7 @@ class HeuristicChunker(Chunker):
                         "author": meta["author"],
                         "chapter": chapter,
                         "section": section,
-                        "page": None,  # MVP では未取得（列は将来の表示用に残す）
+                        "page": page,
                         "text": text,
                     }
                 )

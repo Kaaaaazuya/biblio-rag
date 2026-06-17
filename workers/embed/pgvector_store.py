@@ -15,14 +15,14 @@ from .base import VectorStore
 
 _UPSERT = """
 INSERT INTO chunks
-    (book_id, chunk_index, title, author, chapter, section, page, text, embedding)
+    (book_id, chunk_index, title, author, chapter, section, page, text, embedding, embed_model)
 VALUES
     (%(book_id)s, %(chunk_index)s, %(title)s, %(author)s, %(chapter)s,
-     %(section)s, %(page)s, %(text)s, %(embedding)s::vector)
+     %(section)s, %(page)s, %(text)s, %(embedding)s::vector, %(embed_model)s)
 ON CONFLICT (book_id, chunk_index) DO UPDATE SET
     title = EXCLUDED.title, author = EXCLUDED.author, chapter = EXCLUDED.chapter,
     section = EXCLUDED.section, page = EXCLUDED.page, text = EXCLUDED.text,
-    embedding = EXCLUDED.embedding
+    embedding = EXCLUDED.embedding, embed_model = EXCLUDED.embed_model
 """
 
 _SEARCH = """
