@@ -48,3 +48,23 @@ def test_index_served():
     res = client.get("/")
     assert res.status_code == 200
     assert "書籍アップロード" in res.text
+
+
+def test_ingest_bad_book_id():
+    res = client.post("/api/ingest", json={"book_id": ""})
+    assert res.status_code == 400
+
+
+def test_ingest_status_unknown():
+    res = client.get("/api/ingest/nonexistent/status")
+    assert res.status_code == 200
+    assert res.json()["status"] == "unknown"
+
+
+def test_ingest_sets_pending_status(monkeypatch):
+    # パイプライン本体は呼ばずにステータス遷移だけ確認
+    monkeypatch.setattr(server, "_run_pipeline", lambda book_id: None)
+    client.post("/api/ingest", json={"book_id": "testbook"})
+    res = client.get("/api/ingest/testbook/status")
+    assert res.status_code == 200
+    assert res.json()["status"] in ("pending", "done")  # BackgroundTask 完了タイミング依存

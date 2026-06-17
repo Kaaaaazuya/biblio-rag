@@ -14,9 +14,11 @@ from __future__ import annotations
 
 import json
 import re
+import threading
 from pathlib import Path
 
 from starlette.applications import Starlette
+from starlette.background import BackgroundTasks
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Mount, Route
@@ -27,6 +29,49 @@ from workers.storage import RAW_PREFIX
 
 STATIC_DIR = Path(__file__).parent / "static"
 BOOKS_DIR = Path("books")
+
+# 取り込みステータスのインメモリストア（プロセス再起動でリセット）
+_status: dict[str, dict] = {}
+_status_lock = threading.Lock()
+
+
+def _set_status(book_id: str, status: str, error: str | None = None) -> None:
+    with _status_lock:
+        _status[book_id] = {"status": status, "error": error}
+
+
+def _run_pipeline(book_id: str) -> None:
+    """extract → chunk → embed を同期実行する。BackgroundTask から呼ばれる。"""
+    try:
+        from workers.chunk.chunk import chunk_markdown
+        from workers.embed.ollama_embedder import OllamaEmbedder
+        from workers.embed.pgvector_store import PgVectorStore
+        from workers.embed.pipeline import embed_and_store
+        from workers.extract.extract import extract_pdf_to_markdown
+        from workers.storage import ObjectStore
+
+        _set_status(book_id, "extracting")
+        obj = ObjectStore()
+        pdf_bytes = obj.get_bytes(f"{RAW_PREFIX}{book_id}.pdf")
+        md = extract_pdf_to_markdown(pdf_bytes)
+
+        _set_status(book_id, "chunking")
+        meta_path = BOOKS_DIR / f"{book_id}.meta.json"
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        meta.setdefault("book_id", book_id)
+        records = chunk_markdown(md, meta)
+
+        _set_status(book_id, "embedding")
+        embedder = OllamaEmbedder(config.OLLAMA_HOST, config.EMBED_MODEL, config.EMBED_DIM)
+        store = PgVectorStore(config.database_url())
+        try:
+            embed_and_store(records, embedder, store, embed_model=config.EMBED_MODEL)
+        finally:
+            store.close()
+
+        _set_status(book_id, "done")
+    except Exception as e:  # noqa: BLE001
+        _set_status(book_id, "failed", str(e))
 
 
 def _safe_name(name: str) -> str:
@@ -82,10 +127,33 @@ async def save_meta(request: Request) -> JSONResponse:
     return JSONResponse({"book_id": book_id, "meta": str(path)})
 
 
+async def ingest(request: Request) -> JSONResponse:
+    """取り込みパイプライン（extract→chunk→embed）をバックグラウンドで起動する。"""
+    body = await request.json()
+    try:
+        book_id = _safe_name(body.get("book_id", ""))
+    except ValueError as e:
+        return JSONResponse({"detail": str(e)}, status_code=400)
+    _set_status(book_id, "pending")
+    tasks = BackgroundTasks()
+    tasks.add_task(_run_pipeline, book_id)
+    return JSONResponse({"book_id": book_id, "status": "pending"}, background=tasks)
+
+
+async def ingest_status(request: Request) -> JSONResponse:
+    """取り込みステータスを返す。"""
+    book_id = request.path_params["book_id"]
+    with _status_lock:
+        s = dict(_status.get(book_id, {"status": "unknown", "error": None}))
+    return JSONResponse(s)
+
+
 app = Starlette(
     routes=[
         Route("/api/presign", presign, methods=["POST"]),
         Route("/api/meta", save_meta, methods=["POST"]),
+        Route("/api/ingest", ingest, methods=["POST"]),
+        Route("/api/ingest/{book_id}/status", ingest_status, methods=["GET"]),
         # 静的フロント（最後にマウント。html=True で / に index.html を返す）
         Mount("/", app=StaticFiles(directory=STATIC_DIR, html=True), name="static"),
     ]

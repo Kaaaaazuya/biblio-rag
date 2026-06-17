@@ -1,4 +1,4 @@
-// PDF を presigned URL で S3(MinIO) に直接アップロードし、メタデータを保存する。
+// PDF を presigned URL で S3(MinIO) に直接アップロードし、取り込みパイプラインを自動起動する。
 const form = document.getElementById("form");
 const fileInput = document.getElementById("file");
 const titleInput = document.getElementById("title");
@@ -6,6 +6,16 @@ const authorInput = document.getElementById("author");
 const submitBtn = document.getElementById("submit");
 const progress = document.getElementById("progress");
 const statusEl = document.getElementById("status");
+
+const STEP_LABELS = {
+  pending: "待機中…",
+  extracting: "PDF を抽出中…",
+  chunking: "チャンク分割中…",
+  embedding: "埋め込み・格納中…（数分かかります）",
+  done: "完了",
+  failed: "失敗",
+  unknown: "不明",
+};
 
 function setStatus(msg, kind = "") {
   statusEl.textContent = msg;
@@ -19,7 +29,7 @@ function putToS3(url, file) {
     xhr.open("PUT", url);
     xhr.setRequestHeader("Content-Type", "application/pdf");
     xhr.upload.onprogress = (e) => {
-      if (e.lengthComputable) progress.value = Math.round((e.loaded / e.total) * 100);
+      if (e.lengthComputable) progress.value = Math.round((e.loaded / e.total) * 80);
     };
     xhr.onload = () =>
       xhr.status >= 200 && xhr.status < 300
@@ -43,6 +53,24 @@ async function postJSON(path, body) {
   return res.json();
 }
 
+async function pollIngestStatus(book_id) {
+  while (true) {
+    await new Promise((r) => setTimeout(r, 2000));
+    const { status, error } = await fetch(`/api/ingest/${book_id}/status`).then((r) => r.json());
+    const label = STEP_LABELS[status] || status;
+    if (status === "done") {
+      progress.value = 100;
+      setStatus(`完了: book_id=${book_id}`, "ok");
+      return;
+    }
+    if (status === "failed") {
+      setStatus(`失敗: ${error || label}`, "err");
+      return;
+    }
+    setStatus(label);
+  }
+}
+
 form.addEventListener("submit", async (e) => {
   e.preventDefault();
   const file = fileInput.files[0];
@@ -60,6 +88,7 @@ form.addEventListener("submit", async (e) => {
 
     setStatus(`アップロード中… (${key})`);
     await putToS3(url, file);
+    progress.value = 85;
 
     setStatus("メタデータを保存中…");
     await postJSON("/api/meta", {
@@ -67,9 +96,13 @@ form.addEventListener("submit", async (e) => {
       title: titleInput.value.trim(),
       author: authorInput.value.trim(),
     });
+    progress.value = 90;
 
-    setStatus(`完了: ${key}（book_id=${book_id}）。次に extract→chunk→embed を実行してください。`, "ok");
+    setStatus("取り込みを開始中…");
+    await postJSON("/api/ingest", { book_id });
+
     form.reset();
+    await pollIngestStatus(book_id);
   } catch (err) {
     setStatus(err.message, "err");
   } finally {
