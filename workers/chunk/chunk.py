@@ -1,7 +1,7 @@
 """② チャンク層: 構造つき Markdown → チャンク JSONL。
 
 方針（ADR 0007 / design.md）:
-  - 文字数ベース分割（既定 500 字・overlap 80 字、設定で可変）
+  - 文字数ベース分割（既定 800 字・overlap 120 字、設定で可変）
   - 句点「。」優先で文の途中で切らない
   - 見出し境界を尊重（見出しをまたいでチャンクしない）
   - 見出し階層を prefix として本文頭に付与（例「第一章 設計の前提 > 1.1 目的とスコープ」）
@@ -27,8 +27,8 @@ NORM_DIR = Path("books/normalized")
 OUT_DIR = Path("books/chunks")
 BOOKS_DIR = Path("books")
 
-DEFAULT_SIZE = 500
-DEFAULT_OVERLAP = 80
+DEFAULT_SIZE = 800
+DEFAULT_OVERLAP = 120
 
 _HEADING_RE = re.compile(r"^(#{1,6})\s+(.*)$")
 
