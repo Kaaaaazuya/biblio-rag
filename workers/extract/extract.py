@@ -138,6 +138,7 @@ def extract_pdf_to_markdown(src: str | Path | bytes) -> str:
     buf: list[str] = []  # 現在組み立て中の段落/見出しのテキスト
     buf_level: int | None = None  # None=本文段落、>=1=見出しレベル
     prev: _Line | None = None
+    cur_page: int = -1
 
     def flush():
         if buf:
@@ -155,6 +156,11 @@ def extract_pdf_to_markdown(src: str | Path | bytes) -> str:
         # 直前と種別が変わる or 離れていれば確定して新規開始
         if buf and (level != buf_level or not adjacent):
             flush()
+        # ページ変わり目にマーカーを挿入（chunk 層がページ番号を取得するため）
+        if ln.page != cur_page:
+            flush()
+            blocks.append(f"<!-- page:{ln.page + 1} -->")  # 1始まり
+            cur_page = ln.page
         buf_level = level
         buf.append(ln.text)
         prev = ln

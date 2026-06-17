@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS chunks (
     page         INTEGER,
     text         TEXT        NOT NULL,
     embedding    VECTOR(1024) NOT NULL,
+    embed_model  TEXT        NOT NULL DEFAULT 'bge-m3',  -- 再埋め込み対象の特定に使う
     created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
     UNIQUE (book_id, chunk_index)              -- 再投入時は重複させず upsert する
 );

@@ -25,11 +25,15 @@ def load_jsonl(path: Path) -> list[dict]:
         return [json.loads(line) for line in f if line.strip()]
 
 
-def embed_and_store(records: list[dict], embedder: Embedder, store: VectorStore) -> int:
+def embed_and_store(
+    records: list[dict], embedder: Embedder, store: VectorStore, embed_model: str = ""
+) -> int:
     """チャンク群を埋め込み、格納する。格納件数を返す。"""
     if not records:
         return 0
     vectors = embedder.embed([r["text"] for r in records])
+    if embed_model:
+        records = [{**r, "embed_model": embed_model} for r in records]
     store.upsert(records, vectors)
     return len(records)
 
@@ -61,7 +65,7 @@ def _cli(argv: list[str]) -> int:
                 continue
             if exists:
                 store.delete_book(book_id)  # 再投入前に既存を消してクリーンに入れ直す
-            n = embed_and_store(records, embedder, store)
+            n = embed_and_store(records, embedder, store, embed_model=config.EMBED_MODEL)
             print(f"{path} -> pgvector ({n} chunks)")
     finally:
         store.close()
