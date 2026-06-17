@@ -53,8 +53,8 @@
 - [x] **実書籍での通し評価**：クリーンコードクックブックで実施（上「通し検証の結果」参照）。
 - [x] **検索精度のチューニング**：チャンク長/オーバーラップのスイープ完了（300/60・500/80・800/120）。**800/120 を新デフォルトに採用**（ハードクエリ MRR: 0.556 → 0.694、+24%）。`scripts/eval_search.py` 追加済み。Reranker は見送り。
 - [ ] **コードブロックの扱い**：抽出/チャンクでコードが行途中分割される問題（通し検証で発覚）。
-- [ ] **page 付与の検討**：① がページ境界を中間データに残す拡張（現状 `page=null`、列は保持済み）。
-- [ ] **WebUI の実利用確認**：アップロード → extract が拾う導線（必要なら自動トリガ）。※ブラウザ→MinIO は webui E2E で担保済み。
+- [x] **page 付与**：extract が `<!-- page:N -->` マーカーを Markdown に挿入、chunk が `page` 列に反映（1-based）。
+- [x] **WebUI 自動トリガー**：アップロード後に `/api/ingest` を呼びパイプラインをバックグラウンド起動。ステータスを 2 秒ポーリングで UI に表示。
 - [ ] （任意）normalized/chunks も S3 へ寄せるか検討（現状は raw=S3 / 中間=ローカル FS）。
 
 ## 2nd ステージ（AWS 化）— 設計確定済み・実装待ち
@@ -76,10 +76,14 @@
 - [ ] **λ-embed**（zip）：chunks/ から JSONL 取得 → Bedrock 埋め込み → Aurora upsert（**トランザクション内で DELETE + INSERT**・autocommit 無効化）。
 - [ ] **λ-presign**（zip）：API Gateway POST /presign → presigned URL 発行。
 - [ ] **λ-search**（zip）：API Gateway GET /search → クエリ埋め込み → pgvector 検索 → JSON 返却。
+- [ ] **`ObjectStore` 拡張**：`workers/storage.py` に `put_text` / `get_text` / `put_jsonl` / `load_jsonl` / `get_meta` を追加。Lambda ハンドラが中間ファイルを S3 経由で受け渡せるようにする（現状はローカル FS）。
+- [ ] **`PgVectorStore` トランザクションモード対応**：`autocommit=False` オプションを追加。λ-embed で DELETE + INSERT をトランザクション内で実行するために必要。
+- [ ] **`workers/lambda/` ハンドラ 3 本**：`extract_handler.py` / `chunk_handler.py` / `embed_handler.py` を新規作成。現行 `_run_pipeline()` の各ステージを SQS トリガーの Lambda ハンドラに分解する。
+- [ ] **`webui/server.py` の `/api/ingest` 削除**（カットオーバー時）：S3 Event → SQS に切り替わったら BackgroundTasks ベースのエンドポイントは不要になる。
 
 ### スキーマ・モデル
-- [ ] **`embed_model` カラム追加**：`ALTER TABLE chunks ADD COLUMN embed_model TEXT NOT NULL DEFAULT 'bge-m3';`。マイグレーション SQL を `infra/db/` に追加。
-- [ ] **`BedrockEmbedder` 実装**：Titan Embeddings V2（1024 次元）。環境変数 `EMBED_BACKEND=bedrock` で切替。
+- [x] **`embed_model` カラム追加**：`infra/db/002_add_embed_model.sql` 追加済み。`pipeline.py` の `embed_and_store()` で `embed_model` を各レコードに付与。
+- [x] **`BedrockEmbedder` 実装**：`workers/embed/bedrock_embedder.py` 追加済み。`EMBED_BACKEND=bedrock` で切替（`make_embedder()` / `active_embed_model()` ファクトリ経由）。
 - [ ] **全書籍の再埋め込み**：`chunks/*.jsonl` を正本に Bedrock で再埋め込み → Aurora へ投入（意味空間が変わるため必須）。
 
 ### 検証
@@ -92,7 +96,7 @@
 
 - 多段組み PDF の読み順は崩れうる（単段の素直な PDF を想定）。
 - 見出しレベルが飛ぶ構成で chapter/section 割り当てがずれうる。
-- チャンクの `page` は MVP では `null`。
+- チャンクの `page` は extract のページマーカーから取得するため、マーカーが付かないセクション（表紙など）では `null` になる場合がある。
 
 ## Open Questions（design.md §12）
 
