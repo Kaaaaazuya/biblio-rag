@@ -14,6 +14,10 @@ OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
 EMBED_MODEL = os.getenv("EMBED_MODEL", "bge-m3")
 EMBED_DIM = int(os.getenv("EMBED_DIM", "1024"))
 
+# EMBED_BACKEND=bedrock のとき BedrockEmbedder を使う（デフォルトは ollama）
+EMBED_BACKEND = os.getenv("EMBED_BACKEND", "ollama")
+BEDROCK_EMBED_MODEL = os.getenv("BEDROCK_EMBED_MODEL", "amazon.titan-embed-text-v2:0")
+
 # オブジェクトストレージ（開発: MinIO / 本番: AWS S3）
 # 本番は S3_ENDPOINT_URL を空にすると boto3 が AWS S3 を指す。
 S3_ENDPOINT_URL = os.getenv("S3_ENDPOINT_URL") or None

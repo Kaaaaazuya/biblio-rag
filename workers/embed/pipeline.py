@@ -17,6 +17,23 @@ from .base import Embedder, VectorStore
 from .ollama_embedder import OllamaEmbedder
 from .pgvector_store import PgVectorStore
 
+
+def make_embedder() -> Embedder:
+    """EMBED_BACKEND 環境変数に応じた Embedder を返す。"""
+    if config.EMBED_BACKEND == "bedrock":
+        from .bedrock_embedder import BedrockEmbedder
+
+        return BedrockEmbedder(config.BEDROCK_EMBED_MODEL, config.EMBED_DIM, config.AWS_REGION)
+    return OllamaEmbedder(config.OLLAMA_HOST, config.EMBED_MODEL, config.EMBED_DIM)
+
+
+def active_embed_model() -> str:
+    """現在の EMBED_BACKEND に対応するモデル名を返す（embed_model カラムに格納する値）。"""
+    if config.EMBED_BACKEND == "bedrock":
+        return config.BEDROCK_EMBED_MODEL
+    return config.EMBED_MODEL
+
+
 CHUNKS_DIR = Path("books/chunks")
 
 
@@ -50,8 +67,9 @@ def _cli(argv: list[str]) -> int:
         print(f"JSONL が見つかりません（{CHUNKS_DIR}/*.jsonl または引数で指定）", file=sys.stderr)
         return 1
 
-    embedder = OllamaEmbedder(config.OLLAMA_HOST, config.EMBED_MODEL, config.EMBED_DIM)
+    embedder = make_embedder()
     store = PgVectorStore(config.database_url())
+    model_name = active_embed_model()
     try:
         for path in paths:
             records = load_jsonl(path)
@@ -65,7 +83,7 @@ def _cli(argv: list[str]) -> int:
                 continue
             if exists:
                 store.delete_book(book_id)  # 再投入前に既存を消してクリーンに入れ直す
-            n = embed_and_store(records, embedder, store, embed_model=config.EMBED_MODEL)
+            n = embed_and_store(records, embedder, store, embed_model=model_name)
             print(f"{path} -> pgvector ({n} chunks)")
     finally:
         store.close()

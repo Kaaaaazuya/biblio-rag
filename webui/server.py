@@ -44,7 +44,6 @@ def _run_pipeline(book_id: str) -> None:
     """extract → chunk → embed を同期実行する。BackgroundTask から呼ばれる。"""
     try:
         from workers.chunk.chunk import chunk_markdown
-        from workers.embed.ollama_embedder import OllamaEmbedder
         from workers.embed.pgvector_store import PgVectorStore
         from workers.embed.pipeline import embed_and_store
         from workers.extract.extract import extract_pdf_to_markdown
@@ -62,10 +61,12 @@ def _run_pipeline(book_id: str) -> None:
         records = chunk_markdown(md, meta)
 
         _set_status(book_id, "embedding")
-        embedder = OllamaEmbedder(config.OLLAMA_HOST, config.EMBED_MODEL, config.EMBED_DIM)
+        from workers.embed.pipeline import active_embed_model, make_embedder
+
+        embedder = make_embedder()
         store = PgVectorStore(config.database_url())
         try:
-            embed_and_store(records, embedder, store, embed_model=config.EMBED_MODEL)
+            embed_and_store(records, embedder, store, embed_model=active_embed_model())
         finally:
             store.close()
 
