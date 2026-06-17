@@ -17,12 +17,20 @@ dependencies = [
 [dependency-groups]
 dev = [
     "pytest>=9.1.0",
+    "pytest-playwright>=0.8.0",
     "reportlab>=4.5.1",
     "ruff>=0.15.17",
 ]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# E2E（実インフラ/ブラウザ必須）は既定で除外。
+# 明示実行: `uv run pytest -m e2e`（パイプライン） / `uv run pytest -m webui`（ブラウザ）。
+addopts = "-m 'not e2e and not webui'"
+markers = [
+    "e2e: 実インフラ(MinIO/pgvector/Ollama)が必要な取り込みパイプライン統合テスト",
+    "webui: ブラウザ(Playwright)が必要な WebUI E2E",
+]
 
 [tool.ruff]
 line-length = 100
