@@ -60,35 +60,37 @@
 ## 2nd ステージ（AWS 化）— 設計確定済み・実装待ち
 
 > MVP では SQS / Lambda / LocalStack / AWS を一切使わない方針（CLAUDE.md）。設計方針は [ADR 0011](docs/adr/0011-aws-serverless-pipeline.md)。
+> **進め方**：まず AWS 不要の Phase A（コード層）をローカル + moto で実装・テストし、動いてから Phase B（Terraform で AWS リソース作成）へ。IaC は **Terraform** 指定。
 
-### インフラ構築
-- [ ] **Aurora Serverless v2 セットアップ**：PostgreSQL 互換・0 ACU 最小・pgvector 拡張有効化。
-- [ ] **RDS Proxy セットアップ**：Lambda → Aurora の接続プール管理。
-- [ ] **SQS キュー × 3 + DLQ × 3**：raw / norm / chunks キュー。Visibility Timeout は各 Lambda タイムアウト × 6。
-- [ ] **DLQ アラート**：DLQ 到達時に EventBridge → SNS 通知。
-- [ ] **S3 バケット**：raw / normalized / chunks プレフィックス。ライフサイクルポリシー（normalized・chunks は 30 日後削除）。
-- [ ] **CloudFront + S3 static**：WebUI 静的配信。
-- [ ] **Secrets Manager**：`DATABASE_URL`・AWS 認証情報を管理。
-
-### Lambda 実装
-- [ ] **λ-extract**（コンテナイメージ）：S3 から PDF 取得 → 抽出 → normalized/ に書き出し → SQS(norm) 送信。
-- [ ] **λ-chunk**（zip）：normalized/ から MD 取得 → チャンク → chunks/ に書き出し → SQS(chunks) 送信。
-- [ ] **λ-embed**（zip）：chunks/ から JSONL 取得 → Bedrock 埋め込み → Aurora upsert（**トランザクション内で DELETE + INSERT**・autocommit 無効化）。
-- [ ] **λ-presign**（zip）：API Gateway POST /presign → presigned URL 発行。
-- [ ] **λ-search**（zip）：API Gateway GET /search → クエリ埋め込み → pgvector 検索 → JSON 返却。
-- [ ] **`ObjectStore` 拡張**：`workers/storage.py` に `put_text` / `get_text` / `put_jsonl` / `load_jsonl` / `get_meta` を追加。Lambda ハンドラが中間ファイルを S3 経由で受け渡せるようにする（現状はローカル FS）。
-- [ ] **`PgVectorStore` トランザクションモード対応**：`autocommit=False` オプションを追加。λ-embed で DELETE + INSERT をトランザクション内で実行するために必要。
-- [ ] **`workers/lambda/` ハンドラ 3 本**：`extract_handler.py` / `chunk_handler.py` / `embed_handler.py` を新規作成。現行 `_run_pipeline()` の各ステージを SQS トリガーの Lambda ハンドラに分解する。
-- [ ] **`webui/server.py` の `/api/ingest` 削除**（カットオーバー時）：S3 Event → SQS に切り替わったら BackgroundTasks ベースのエンドポイントは不要になる。
-
-### スキーマ・モデル
+### 済（スキーマ・モデルの先行実装）
 - [x] **`embed_model` カラム追加**：`infra/db/002_add_embed_model.sql` 追加済み。`pipeline.py` の `embed_and_store()` で `embed_model` を各レコードに付与。
 - [x] **`BedrockEmbedder` 実装**：`workers/embed/bedrock_embedder.py` 追加済み。`EMBED_BACKEND=bedrock` で切替（`make_embedder()` / `active_embed_model()` ファクトリ経由）。
-- [ ] **全書籍の再埋め込み**：`chunks/*.jsonl` を正本に Bedrock で再埋め込み → Aurora へ投入（意味空間が変わるため必須）。
 
-### 検証
+### Phase A：コード層（AWS 不要・ローカル + moto でテスト可・先に着手）
+- [ ] **`ObjectStore` 拡張**：`workers/storage.py` に `put_text` / `get_text` / `put_jsonl` / `load_jsonl` / `get_meta` / `put_meta` を追加。中間ファイルを S3 経由で受け渡せるようにする（現状はローカル FS）。
+- [ ] **meta を S3 object metadata で受け渡し**：presign 発行時に `Metadata`（title/author を **URL エンコード**）を指定し、ブラウザは `x-amz-meta-*` 付きで PUT。λ-extract が `head_object` で取得しデコード（S3 metadata は US-ASCII 限定のため）。
+- [ ] **`PgVectorStore` トランザクションモード対応**：`autocommit=False` オプションを追加。λ-chunk の DELETE / λ-embed の upsert をトランザクション化するために必要。
+- [ ] **chunk の JSONL 分割出力**：Bedrock 逐次呼び出しのタイムアウト回避のため、chunks JSONL を N チャンクごとに分割して出力。**fan-out 前に一度だけ `delete_book()`** を実行（並列 embed の競合回避。embed は純粋 upsert のみ）。
+- [ ] **`workers/lambda/` ハンドラ 5 本**：`extract_handler.py` / `chunk_handler.py` / `embed_handler.py` / `presign_handler.py` / `search_handler.py`。現行 `_run_pipeline()` / `presign` / 検索の各ロジックを薄くラップ。moto（S3/SQS）で単体テスト。
+
+### Phase B：インフラ（Terraform）
+- [ ] **Terraform プロジェクト初期化**：`infra/terraform/`。state 管理（S3 backend）・環境変数設計。
+- [ ] **S3 バケット**：raw / normalized / chunks プレフィックス。プレフィックスごとに **S3 イベント通知 → 対応 SQS**。ライフサイクル（normalized・chunks は 30 日後削除）。
+- [ ] **SQS キュー × 3 + DLQ × 3**：raw / norm / chunks。Visibility Timeout は各 Lambda タイムアウト × 6。maxReceiveCount=3。
+- [ ] **DLQ アラート**：DLQ 到達時に EventBridge → SNS 通知。
+- [ ] **Aurora Serverless v2**：PostgreSQL 互換・0 ACU 最小・pgvector 拡張有効化。
+- [ ] **RDS Proxy**：Lambda → Aurora の接続プール管理。
+- [ ] **VPC + エンドポイント**：Lambda を VPC 内に配置。S3=Gateway エンドポイント（無料）、Bedrock + Secrets Manager=Interface エンドポイント 各 ~$7/月（or NAT ~$32/月）。
+- [ ] **Secrets Manager**：`DATABASE_URL`・AWS 認証情報を管理。
+- [ ] **Lambda デプロイ**：λ-extract（コンテナ・pymupdf）/ λ-chunk・embed・presign・search（zip）。SQS / API Gateway トリガー紐付け。
+- [ ] **CloudFront + S3 static**：WebUI 静的配信。
+
+### Phase C：データ移行・検証・カットオーバー
+- [ ] **全書籍の再埋め込み**：`chunks/*.jsonl` を正本に Bedrock で再埋め込み → Aurora へ投入（意味空間が変わるため必須）。
 - [ ] **本番モデルでの検索精度評価**：`scripts/eval_search.py` で Titan V2 の MRR を計測。ローカル（bge-m3）の 0.694 と比較。
-- [ ] **RDS Proxy コスト計測**：実際の ACU × $0.015/h を 1 ヶ月計測。Aurora + Proxy の合計が $23 超なら Neon 移行を検討。
+- [ ] **S3 イベント経路の並行稼働検証**：1 冊を S3 PUT → 自動で extract→chunk→embed が通ることを確認。
+- [ ] **`webui/server.py` の `/api/ingest` 削除**（カットオーバー時）：S3 Event → SQS に切り替わったら BackgroundTasks ベースのエンドポイントは不要。
+- [ ] **RDS Proxy コスト計測**：実際の ACU × $0.015/h を 1 ヶ月計測。Aurora + Proxy + VPC エンドポイントの合計が Neon 想定を超えるなら移行を検討。
 
 - 経緯：ADR [0002](docs/adr/0002-execution-platforms.md) / [0003](docs/adr/0003-messaging-sqs.md) / [0004](docs/adr/0004-fargate-zero-scale.md) / [0006](docs/adr/0006-local-to-aws.md) / [0011](docs/adr/0011-aws-serverless-pipeline.md)。
 
