@@ -16,10 +16,25 @@ from __future__ import annotations
 
 import argparse
 import sys
+import unicodedata
 from pathlib import Path
 from urllib.parse import quote
 
 from workers.storage import RAW_PREFIX, ObjectStore
+
+
+def _find_raw_key(store: ObjectStore, book_id: str) -> str | None:
+    """S3 の実キーを NFC 正規化して book_id と照合する。
+
+    macOS はファイル名を NFD で保存するため、アップロード時のキーが NFD になる場合がある。
+    ターミナル入力は NFC であることが多く、文字列比較でミスマッチが起きる。
+    両辺を NFC に揃えて一致するキーを返す。
+    """
+    target = unicodedata.normalize("NFC", book_id)
+    for key in store.list_pdfs(RAW_PREFIX):
+        if unicodedata.normalize("NFC", Path(key).stem) == target:
+            return key
+    return None
 
 
 def _cli(argv: list[str]) -> int:
@@ -47,7 +62,13 @@ def _cli(argv: list[str]) -> int:
         if not args.title:
             print("--book-id には --title/--author も必要です", file=sys.stderr)
             return 1
-        key = f"{RAW_PREFIX}{args.book_id}.pdf"
+        key = _find_raw_key(store, args.book_id)
+        if key is None:
+            print(
+                f"見つかりません: raw/{args.book_id}.pdf（MinIO に raw PDF が存在するか確認）",
+                file=sys.stderr,
+            )
+            return 1
         metadata = {"title": quote(args.title), "author": quote(args.author)}
         try:
             store.client.copy_object(
