@@ -66,24 +66,31 @@
 - [x] **`embed_model` カラム追加**：`infra/db/002_add_embed_model.sql` 追加済み。`pipeline.py` の `embed_and_store()` で `embed_model` を各レコードに付与。
 - [x] **`BedrockEmbedder` 実装**：`workers/embed/bedrock_embedder.py` 追加済み。`EMBED_BACKEND=bedrock` で切替（`make_embedder()` / `active_embed_model()` ファクトリ経由）。
 
-### Phase A：コード層（AWS 不要・ローカル + moto でテスト可・先に着手）
-- [ ] **`ObjectStore` 拡張**：`workers/storage.py` に `put_text` / `get_text` / `put_jsonl` / `load_jsonl` / `get_meta` / `put_meta` を追加。中間ファイルを S3 経由で受け渡せるようにする（現状はローカル FS）。
-- [ ] **meta を S3 object metadata で受け渡し**：presign 発行時に `Metadata`（title/author を **URL エンコード**）を指定し、ブラウザは `x-amz-meta-*` 付きで PUT。λ-extract が `head_object` で取得しデコード（S3 metadata は US-ASCII 限定のため）。
-- [ ] **`PgVectorStore` トランザクションモード対応**：`autocommit=False` オプションを追加。λ-chunk の DELETE / λ-embed の upsert をトランザクション化するために必要。
-- [ ] **chunk の JSONL 分割出力**：Bedrock 逐次呼び出しのタイムアウト回避のため、chunks JSONL を N チャンクごとに分割して出力。**fan-out 前に一度だけ `delete_book()`** を実行（並列 embed の競合回避。embed は純粋 upsert のみ）。
-- [ ] **`workers/lambda/` ハンドラ 5 本**：`extract_handler.py` / `chunk_handler.py` / `embed_handler.py` / `presign_handler.py` / `search_handler.py`。現行 `_run_pipeline()` / `presign` / 検索の各ロジックを薄くラップ。moto（S3/SQS）で単体テスト。
+### Phase A：コード層（AWS 不要・ローカル + moto でテスト可）✅ 完了
+- [x] **`ObjectStore` 拡張**：`workers/storage.py` に `put_text` / `get_text` / `put_jsonl` / `load_jsonl` / `put_bytes` / `get_meta` を追加（`put_meta` は `put_bytes(metadata=)` に統合）。`tests/test_storage.py`。
+- [x] **meta を S3 object metadata で受け渡し**：`get_meta` が title/author を URL デコードして返す（S3 metadata は US-ASCII 限定）。presign 側の `Metadata` 付与は WebUI カットオーバー時（Phase C）。
+- [x] **chunk の JSONL 分割出力**：`chunk_handler.SPLIT_SIZE` ごとに分割出力。**fan-out 前に一度だけ `delete_book()`**（並列 embed の競合回避・embed は純粋 upsert）。
+- [x] **`workers/lambda_fns/` ハンドラ**：`events` + `extract_handler` / `chunk_handler` / `embed_handler`。`tests/test_lambda_handlers.py`（moto）。※`presign`/`search` ハンドラは WebUI/API Gateway 化時（Phase C）。
+- [ ] **`PgVectorStore` トランザクションモード対応**：`autocommit=False` オプション。分割並列設計では不要（chunk が一度だけ DELETE→embed は upsert のみ）。非分割の単一 embed を採る場合に追加。
 
-### Phase B：インフラ（Terraform）
-- [ ] **Terraform プロジェクト初期化**：`infra/terraform/`。state 管理（S3 backend）・環境変数設計。
-- [ ] **S3 バケット**：raw / normalized / chunks プレフィックス。プレフィックスごとに **S3 イベント通知 → 対応 SQS**。ライフサイクル（normalized・chunks は 30 日後削除）。
-- [ ] **SQS キュー × 3 + DLQ × 3**：raw / norm / chunks。Visibility Timeout は各 Lambda タイムアウト × 6。maxReceiveCount=3。
-- [ ] **DLQ アラート**：DLQ 到達時に EventBridge → SNS 通知。
-- [ ] **Aurora Serverless v2**：PostgreSQL 互換・0 ACU 最小・pgvector 拡張有効化。
-- [ ] **RDS Proxy**：Lambda → Aurora の接続プール管理。
-- [ ] **VPC + エンドポイント**：Lambda を VPC 内に配置。S3=Gateway エンドポイント（無料）、Bedrock + Secrets Manager=Interface エンドポイント 各 ~$7/月（or NAT ~$32/月）。
-- [ ] **Secrets Manager**：`DATABASE_URL`・AWS 認証情報を管理。
-- [ ] **Lambda デプロイ**：λ-extract（コンテナ・pymupdf）/ λ-chunk・embed・presign・search（zip）。SQS / API Gateway トリガー紐付け。
-- [ ] **CloudFront + S3 static**：WebUI 静的配信。
+### Phase B-local：Terraform + LocalStack でローカル検証 ✅ 完了
+> LocalStack community で S3→SQS→Lambda→pgvector を一気通貫で確認。`scripts/2nd_local.sh` / `tests/test_localstack_e2e.py`（マーカー `localstack`）。
+> **community の制約**：Lambda は **zip のみ**（コンテナイメージは Pro）／ランタイム上限 **python3.12**／**Aurora/RDS Proxy 非対応** → ローカル DB は既存 pgvector コンテナを流用。
+- [x] **Terraform プロジェクト**：`infra/terraform/`（provider は LocalStack エンドポイント・ダミー資格情報）。
+- [x] **S3 バケット + イベント通知**：プレフィックスごと（raw/ norm/ chunks/）に S3 Event → 対応 SQS。
+- [x] **SQS × 3 + DLQ × 3**：maxReceiveCount=3・redrive。
+- [x] **Lambda × 3（zip・arm64・python3.12）**：1 つの zip を共有し handler で振り分け。SQS イベントソースマッピングで起動。
+- [x] **docker-compose に LocalStack 追加**：`LAMBDA_DOCKER_NETWORK=biblio-net` で spawn Lambda が db/ollama/localstack を解決。
+
+### Phase B-aws：実 AWS 化（LocalStack に無い/本番固有のもの）
+- [ ] **Terraform state を S3 backend 化**・本番 endpoints へ切替（ダミー資格情報を外す）。
+- [ ] **Aurora Serverless v2**：PostgreSQL 互換・0 ACU 最小・pgvector 拡張。
+- [ ] **RDS Proxy**：Lambda → Aurora の接続プール。
+- [ ] **VPC + エンドポイント**：Lambda を VPC 内に配置。S3=Gateway（無料）、Bedrock + Secrets Manager=Interface 各 ~$7/月（or NAT ~$32/月）。
+- [ ] **Secrets Manager**：`DATABASE_URL`・認証情報。
+- [ ] **DLQ アラート**：EventBridge → SNS 通知。
+- [ ] **Lambda パッケージング（本番）**：extract のみコンテナイメージ化も検討（zip 250MB 制限）。python ランタイムは 3.13 へ。
+- [ ] **API Gateway + presign/search Lambda**・**CloudFront + S3 static**（WebUI）。
 
 ### Phase C：データ移行・検証・カットオーバー
 - [ ] **全書籍の再埋め込み**：`chunks/*.jsonl` を正本に Bedrock で再埋め込み → Aurora へ投入（意味空間が変わるため必須）。

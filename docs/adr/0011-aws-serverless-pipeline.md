@@ -136,6 +136,22 @@ VPC 内 Lambda が S3 / Bedrock / Secrets Manager へ出る経路が要る：
 - **段階的に進める**：まず AWS 不要のコード層（`ObjectStore` 拡張・`PgVectorStore` txn モード・
   ハンドラ本体）をローカル + moto で実装・テストし、動いてから Terraform で AWS リソースを作る。
 
+## ローカル検証（Terraform + LocalStack）
+
+実 AWS の前に LocalStack で一気通貫を確認した（`infra/terraform/` / `scripts/2nd_local.sh` /
+`tests/test_localstack_e2e.py`）。S3(raw) PUT → SQS → λ-extract → λ-chunk → λ-embed → pgvector が通る。
+
+LocalStack **community** の制約と対応：
+
+- **Lambda はコンテナイメージ非対応（Pro 機能）** → ローカルは **zip** でデプロイ。
+  zip は `aarch64-manylinux2014 / cp312` の wheel（pymupdf・psycopg[binary] 等）を同梱。
+  本番 AWS では extract のみコンテナイメージ化も選べる（zip 250MB 制限のため）。
+- **ランタイム上限 python3.12** → ローカルは 3.12。`itertools.batched` の `strict=` は 3.13+ なので付けない。
+  本番 AWS は python3.13 を使う。
+- **Aurora / RDS Proxy 非対応** → ローカル DB は既存 pgvector コンテナを流用（`DATABASE_URL` 差し替えのみ）。
+- spawn される Lambda は `LAMBDA_DOCKER_NETWORK` で compose 網に参加し、db / ollama / localstack を
+  サービス名で解決する。
+
 ## 結果
 
 - 良い点: アイドルコストほぼゼロ・AWS ネイティブ・既存 workers/ コードをそのまま Lambda に乗せられる。

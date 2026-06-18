@@ -36,3 +36,8 @@ models/
 .idea/
 .vscode/
 *.swp
+
+# Terraform（ローカル生成物。*.tf と lock はコミットする）
+infra/terraform/.terraform/
+infra/terraform/*.tfstate
+infra/terraform/*.tfstate.*

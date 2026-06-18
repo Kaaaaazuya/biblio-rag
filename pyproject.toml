@@ -27,10 +27,11 @@ dev = [
 testpaths = ["tests"]
 # E2E（実インフラ/ブラウザ必須）は既定で除外。
 # 明示実行: `uv run pytest -m e2e`（パイプライン） / `uv run pytest -m webui`（ブラウザ）。
-addopts = "-m 'not e2e and not webui'"
+addopts = "-m 'not e2e and not webui and not localstack'"
 markers = [
     "e2e: 実インフラ(MinIO/pgvector/Ollama)が必要な取り込みパイプライン統合テスト",
     "webui: ブラウザ(Playwright)が必要な WebUI E2E",
+    "localstack: Terraform+LocalStack の 2nd ステージ E2E（要 scripts/2nd_local.sh deploy）",
 ]
 
 [tool.ruff]
