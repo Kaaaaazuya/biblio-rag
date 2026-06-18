@@ -36,6 +36,35 @@ repos:
         files: ^\.claude/skills/.*\.md$
         pass_filenames: false
 
+  # --- Terraform（infra/terraform 配下の .tf を変更したときだけ）---
+  # system 実行。事前に terraform / tflint / tfsec をインストールしておく（docs/2nd-local.md）。
+  - repo: local
+    hooks:
+      - id: terraform-fmt
+        name: terraform fmt
+        entry: terraform -chdir=infra/terraform fmt -check -recursive
+        language: system
+        files: ^infra/terraform/.*\.tf$
+        pass_filenames: false
+      - id: terraform-validate
+        name: terraform validate
+        entry: bash -c 'terraform -chdir=infra/terraform init -backend=false -input=false >/dev/null && terraform -chdir=infra/terraform validate'
+        language: system
+        files: ^infra/terraform/.*\.tf$
+        pass_filenames: false
+      - id: tflint
+        name: tflint
+        entry: bash -c 'cd infra/terraform && tflint'
+        language: system
+        files: ^infra/terraform/.*\.tf$
+        pass_filenames: false
+      - id: tfsec
+        name: tfsec (HIGH+)
+        entry: tfsec infra/terraform --minimum-severity HIGH --concise-output
+        language: system
+        files: ^infra/terraform/.*\.tf$
+        pass_filenames: false
+
   # --- 基本ハイジーン + 事故防止 ---
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0
