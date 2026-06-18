@@ -32,7 +32,7 @@ docs/                           # design.md / commit-convention.md / adr/
 ## データ / セキュリティ（厳守）
 
 - **書籍データは絶対にコミットしない。** `books/`（raw/normalized/chunks すべて）は本文を含むため git 管理外。`.gitignore` 済み。
-- **「正本」は git ではなくディスク/S3。** `normalized/*.md`・`chunks/*.jsonl` は再チューニング用の元データという意味の正本で、保管先はローカルディスク（開発）/ S3（本番）。
+- **「正本」は git ではなく MinIO/S3。** `normalized/*.md`・`chunks/*.jsonl` は再チューニング用の元データという意味の正本で、保管先は MinIO/S3（開発・本番ともに S3 互換）。
 - コミット可能な本文は `tests/fixtures/` の著作権フリー物のみ（青空文庫等）。
 - **キー・秘密情報をコミットしない。** `.env` は `.gitignore`、共有は `.env.example`（キー名のみ）。AWS 実キーは開発では不要（ダミーで足りる）。本番 DB 認証は Secrets Manager。
 

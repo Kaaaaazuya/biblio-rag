@@ -79,13 +79,13 @@ PDF は **MinIO(S3) の `raw/`** にアップロードし、`title`/`author` の
 # 1) PDF を S3(MinIO) にアップロード。--title/--author で必須メタデータも同時作成
 uv run python -m workers.upload your_book.pdf --title "書名" --author "著者名"
 
-# 2) ① 抽出: S3(raw/) の PDF → books/normalized/*.md
+# 2) ① 抽出: S3(raw/) の PDF → S3(normalized/)
 uv run python -m workers.extract
 
-# 3) ② チャンク: books/normalized/*.md → books/chunks/*.jsonl
+# 3) ② チャンク: S3(normalized/) → S3(chunks/)
 uv run python -m workers.chunk
 
-# 4) ③ 埋め込み + 格納: books/chunks/*.jsonl → pgvector
+# 4) ③ 埋め込み + 格納: S3(chunks/) → pgvector
 uv run python -m workers.embed
 
 # 5) 検索（出典つきで上位チャンクを表示）
@@ -111,15 +111,15 @@ uv run uvicorn webui.server:app --reload --port 8000
 open http://localhost:8000
 ```
 
-PDF・書名・著者を入力 → `raw/<file>.pdf` と `books/<book_id>.meta.json` が作られる。
+PDF・書名・著者を入力 → `raw/<file>.pdf` が S3 に作られ、書誌情報は S3 object metadata に記録される。
 あとは `extract → chunk → embed` で取り込む。詳細は [webui/README.md](webui/README.md)。
 
 ## セキュリティ / データ取り扱いルール（厳守）
 
 このリポジトリは**パブリック公開前提**。以下を機械的・運用的に守る。
 
-- **書籍データはコミットしない。** PDF 原本(`books/raw/`)だけでなく、抽出本文(`books/normalized/`)・チャンク(`books/chunks/`)も**書籍本文を含む**ため `.gitignore` で `books/` ツリー全体を除外している。
-- **「正本」= git ではなくディスク/S3。** `chunks/*.jsonl` 等の「正本」は再チューニング用の元データという意味で、保管先はローカルディスク（開発）/ S3（本番）。git では管理しない。
+- **書籍データはコミットしない。** PDF 原本・抽出本文・チャンクはすべて**書籍本文を含む**ため `.gitignore` で `books/` ツリー全体を除外している。実データは MinIO/S3 上（`raw/` / `normalized/` / `chunks/`）にのみ存在する。
+- **「正本」= git ではなく MinIO/S3。** `chunks/*.jsonl` 等の「正本」は再チューニング用の元データという意味で、保管先は MinIO/S3（開発・本番ともに S3 互換）。git では管理しない。
 - **コミットしてよい本文は著作権フリー物のみ** — 青空文庫等を `tests/fixtures/` に置く。
 - **AWS 実キーをローカルに置かない。** 開発は Ollama + Docker pgvector で完結するためダミーで足りる。本番 DB 認証は Secrets Manager。
 - `.env` は `.gitignore` 済み。共有は `.env.example`（キー名のみ）で。
@@ -166,10 +166,8 @@ uv run pytest              # テスト
 
 ```
 books/            # 書籍データ（.gitignore・コミット禁止）
-  raw/            #   （現在は未使用。原本 PDF は MinIO/S3 の raw/ に置く）
-  normalized/     #   ① 抽出済み Markdown（正本・ローカルFS）
-  chunks/         #   ② 分割済み JSONL（正本・ローカルFS）
-  *.meta.json     #   書籍メタ（title/author・ローカルFS）
+                  #   実データは MinIO/S3 上（raw/ / normalized/ / chunks/）
+                  #   books/ ローカルは空でよい（ローカル PDF 引数指定時のみ使用）
 workers/
   extract/        # ① PyMuPDF 抽出
   chunk/          # ② チャンク（サイズ可変）
