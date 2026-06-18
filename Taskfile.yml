@@ -1,0 +1,79 @@
+version: "3"
+
+vars:
+  COMPOSE: docker compose -f docker/docker-compose.yml
+
+tasks:
+  default:
+    silent: true
+    cmds:
+      - task --list
+
+  # ─── インフラ ───────────────────────────────────────────────────────────────
+
+  up:
+    desc: "開発スタックを起動（db / minio / ollama）"
+    cmd: "{{.COMPOSE}} up -d db minio ollama"
+
+  down:
+    desc: "開発スタックを停止"
+    cmd: "{{.COMPOSE}} down"
+
+  ps:
+    desc: "コンテナの状態確認"
+    cmd: "{{.COMPOSE}} ps"
+
+  pull-model:
+    desc: "埋め込みモデル bge-m3 を取得（初回のみ・約 1.2GB）"
+    cmd: "{{.COMPOSE}} exec ollama ollama pull bge-m3"
+
+  # ─── パイプライン ────────────────────────────────────────────────────────────
+
+  upload:
+    desc: "PDF を S3(MinIO) にアップロード: task upload -- book.pdf --title '書名' --author '著者'"
+    cmd: uv run python -m workers.upload {{.CLI_ARGS}}
+
+  extract:
+    desc: "① S3(raw/) の PDF → S3(normalized/)"
+    cmd: uv run python -m workers.extract {{.CLI_ARGS}}
+
+  chunk:
+    desc: "② S3(normalized/) → S3(chunks/)"
+    cmd: uv run python -m workers.chunk {{.CLI_ARGS}}
+
+  embed:
+    desc: "③ S3(chunks/) → pgvector"
+    cmd: uv run python -m workers.embed {{.CLI_ARGS}}
+
+  ingest:
+    desc: "extract → chunk → embed を順番に実行（一気通貫）"
+    cmds:
+      - task: extract
+      - task: chunk
+      - task: embed
+
+  search:
+    desc: "ベクトル検索: task search -- 'クエリ' --top-k 5"
+    cmd: uv run python -m workers.search {{.CLI_ARGS}}
+
+  # ─── WebUI ──────────────────────────────────────────────────────────────────
+
+  webui:
+    desc: "WebUI 開発サーバ起動（http://localhost:8000）"
+    cmd: uv run uvicorn webui.server:app --reload --port 8000
+
+  # ─── 開発 ───────────────────────────────────────────────────────────────────
+
+  test:
+    desc: "ユニットテスト実行（e2e / webui / localstack 除外）"
+    cmd: uv run pytest -q -m "not e2e and not webui and not localstack" --ignore=tests/test_lambda_handlers.py
+
+  test-all:
+    desc: "全テスト実行（e2e / localstack は要サービス起動）"
+    cmd: uv run pytest -q
+
+  lint:
+    desc: "Ruff でリント + フォーマット"
+    cmds:
+      - uv run ruff check --fix
+      - uv run ruff format

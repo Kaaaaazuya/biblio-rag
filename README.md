@@ -21,6 +21,7 @@
 | Python 3.14 | uv が自動取得（`.python-version` で固定） | — |
 | Docker | pgvector / Ollama を起動（T1〜） | `docker --version` |
 | [Ollama](https://ollama.com/) | 埋め込みモデル `bge-m3` の API 提供（T4〜） | `ollama --version` |
+| [go-task](https://taskfile.dev/) | よく使うコマンドの短縮（`brew install go-task`） | `task --version` |
 | [gitleaks](https://github.com/gitleaks/gitleaks) | コミット前の秘密情報検出（`brew install gitleaks`） | `gitleaks version` |
 | [pre-commit](https://pre-commit.com/) | フック管理（`uv tool install pre-commit`） | `pre-commit --version` |
 
@@ -45,16 +46,12 @@ pre-commit run --all-files   # 初回フルスキャンで動作確認
 ### 開発スタックの起動（T1）
 
 ```bash
-# DB(pgvector)・Ollama・MinIO(S3互換) を起動（スキーマ/バケットは初回に自動適用）
-docker compose -f docker/docker-compose.yml up -d
-
-# 埋め込みモデルを取得（約 1.2GB・初回のみ）※コンテナ内の Ollama に対して実行
-docker compose -f docker/docker-compose.yml exec ollama ollama pull bge-m3
+task up          # DB(pgvector)・Ollama・MinIO を起動（スキーマ/バケットは初回に自動適用）
+task pull-model  # 埋め込みモデル bge-m3 を取得（約 1.2GB・初回のみ）
 
 # 動作確認（1024 次元のベクトルが返る）
 curl http://localhost:11434/api/embed -d '{"model":"bge-m3","input":"テスト"}'
-
-# MinIO コンソール: http://localhost:9001 （minioadmin / minioadmin）でアップロード結果を確認可
+# MinIO コンソール: http://localhost:9001 （minioadmin / minioadmin）
 ```
 
 > **⚠️ macOS のポート衝突注意:** brew 版 Ollama を起動していると 11434 が衝突する。docker 版を使う間は native を止める（`brew services stop ollama` またはアプリ終了）。
@@ -62,43 +59,44 @@ curl http://localhost:11434/api/embed -d '{"model":"bge-m3","input":"テスト"}
 
 停止 / 破棄:
 ```bash
-docker compose -f docker/docker-compose.yml down        # 停止（データは保持）
-docker compose -f docker/docker-compose.yml down -v     # ボリューム含め破棄（スキーマ再適用したい時）
+task down                                               # 停止（データは保持）
+docker compose -f docker/docker-compose.yml down -v    # ボリューム含め破棄（スキーマ再適用したい時）
 ```
 
 ---
 
 ## パイプライン実行（MVP）
 
-PDF は **MinIO(S3) の `raw/`** にアップロードし、`title`/`author` のサイドカー JSON を用意して直列実行する。
-（`book_id` はファイル名 stem。`books/`（normalized/chunks/meta）は `.gitignore` 済みでコミットされない）
+PDF は **MinIO(S3) の `raw/`** にアップロードし、`title`/`author` を指定して直列実行する。
+（`book_id` はファイル名 stem。実データは MinIO/S3 上にのみ存在し git 管理外）
 
 ```bash
-# 0) スタック起動 + モデル取得（上記「開発スタックの起動」を実施済みとする）
+# 1) PDF を S3(MinIO) にアップロード（書誌情報を S3 object metadata に記録）
+task upload -- your_book.pdf --title "書名" --author "著者名"
 
-# 1) PDF を S3(MinIO) にアップロード。--title/--author で必須メタデータも同時作成
-uv run python -m workers.upload your_book.pdf --title "書名" --author "著者名"
+# 2〜4) extract → chunk → embed を一括実行
+task ingest
 
-# 2) ① 抽出: S3(raw/) の PDF → S3(normalized/)
-uv run python -m workers.extract
-
-# 3) ② チャンク: S3(normalized/) → S3(chunks/)
-uv run python -m workers.chunk
-
-# 4) ③ 埋め込み + 格納: S3(chunks/) → pgvector
-uv run python -m workers.embed
-
-# 5) 検索（出典つきで上位チャンクを表示）
-uv run python -m workers.search "調べたいこと" --top-k 5
+# 5) 検索
+task search -- "調べたいこと" --top-k 5
 ```
 
-**増分実行**: extract/chunk/embed は引数なしの一括実行で**処理済み（既存の md/jsonl・格納済み book_id）をスキップ**する。
-全件作り直したい（洗い替え）ときは `--force` を付ける（embed は既存を削除してから入れ直す）。
-特定ファイルを引数で指定した場合は常に処理する。
-
+ステップを個別に実行したい場合:
 ```bash
-uv run python -m workers.chunk --force    # 全 md を再チャンク
-uv run python -m workers.embed --force    # 全 book を再埋め込み（洗い替え）
+task extract   # ① S3(raw/) の PDF → S3(normalized/)
+task chunk     # ② S3(normalized/) → S3(chunks/)
+task embed     # ③ S3(chunks/) → pgvector
+```
+
+**増分実行**: 処理済みはスキップ。全件作り直す（洗い替え）ときは `--force`:
+```bash
+task chunk -- --force   # 全 md を再チャンク
+task embed -- --force   # 全 book を再埋め込み
+```
+
+**既存 PDF のメタデータを後から登録**（古いアップロード等で title/author が未設定の場合）:
+```bash
+task upload -- --book-id mybook --title "書名" --author "著者名"
 ```
 
 ## WebUI（アップロードの足場）
@@ -106,8 +104,8 @@ uv run python -m workers.embed --force    # 全 book を再埋め込み（洗い
 ブラウザから PDF を S3(MinIO) へ直接アップロードする最小スキャフォールド（presigned URL 方式）。
 
 ```bash
-docker compose -f docker/docker-compose.yml up -d   # MinIO 含む
-uv run uvicorn webui.server:app --reload --port 8000
+task up     # MinIO 含むスタック起動
+task webui  # http://localhost:8000
 open http://localhost:8000
 ```
 
@@ -150,9 +148,8 @@ PDF・書名・著者を入力 → `raw/<file>.pdf` が S3 に作られ、書誌
 - リンター/フォーマッターは **Ruff**。pre-commit で自動実行される。手動実行は以下。
 
 ```bash
-uv run ruff check --fix    # lint（自動修正つき）
-uv run ruff format         # フォーマット
-uv run pytest              # テスト
+task lint   # ruff check --fix && ruff format
+task test   # pytest（e2e/localstack 除外）
 ```
 
 - エージェント成果物（`.claude/skills/**/SKILL.md` 等）の脅威スキャンに **ATR** をローカル導入。
