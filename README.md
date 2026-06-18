@@ -7,7 +7,7 @@
 - **本番**: AWS（ECS Fargate + Lambda + SQS + Aurora pgvector + Bedrock Titan V2）※2nd ステージ
 - 詳細設計は [`docs/design.md`](docs/design.md)、意思決定の経緯は [`docs/adr/`](docs/adr/) を参照
 
-> **現在のステータス: MVP 完了（T1〜T5）。** ローカルで PDF→抽出→チャンク→埋め込み→pgvector→検索の縦串が通る。非同期化・AWS 化は 2nd ステージ。
+> **現在のステータス: MVP 完了（T1〜T5）＋ローカル RAG チャット UI。** ローカルで PDF→抽出→チャンク→埋め込み→pgvector→検索の縦串が通り、Ollama を使ったチャット UI（`/chat.html`）から質問できる。非同期化・AWS 化は 2nd ステージ。
 
 > 🚀 **すぐ動かしたい人は [docs/quickstart.md](docs/quickstart.md)** へ（同梱の著作権フリーPDFで検索結果まで一気通貫）。
 
@@ -46,8 +46,9 @@ pre-commit run --all-files   # 初回フルスキャンで動作確認
 ### 開発スタックの起動（T1）
 
 ```bash
-task up          # DB(pgvector)・Ollama・MinIO を起動（スキーマ/バケットは初回に自動適用）
-task pull-model  # 埋め込みモデル bge-m3 を取得（約 1.2GB・初回のみ）
+task up               # DB(pgvector)・Ollama・MinIO を起動（スキーマ/バケットは初回に自動適用）
+task pull-model       # 埋め込みモデル bge-m3 を取得（約 1.2GB・初回のみ）
+task pull-chat-model  # チャットモデル qwen2.5:7b を取得（約 4.7GB・初回のみ）
 
 # 動作確認（1024 次元のベクトルが返る）
 curl http://localhost:11434/api/embed -d '{"model":"bge-m3","input":"テスト"}'
@@ -99,18 +100,37 @@ task embed -- --force   # 全 book を再埋め込み
 task upload -- --book-id mybook --title "書名" --author "著者名"
 ```
 
-## WebUI（アップロードの足場）
+## WebUI
 
-ブラウザから PDF を S3(MinIO) へ直接アップロードする最小スキャフォールド（presigned URL 方式）。
+Starlette ベースの最小 Web アプリ。**アップロード**と**RAG チャット**の 2 機能を持つ。
 
 ```bash
-task up     # MinIO 含むスタック起動
+task up     # MinIO / pgvector / Ollama を起動
 task webui  # http://localhost:8000
-open http://localhost:8000
 ```
 
+### アップロード（`/`）
+
+ブラウザから PDF を S3(MinIO) へ presigned URL で直接 PUT する。
 PDF・書名・著者を入力 → `raw/<file>.pdf` が S3 に作られ、書誌情報は S3 object metadata に記録される。
-あとは `extract → chunk → embed` で取り込む。詳細は [webui/README.md](webui/README.md)。
+あとは `task ingest` で埋め込みまで一気通貫。
+
+### RAG チャット（`/chat.html`）
+
+取り込み済みの書籍に対してチャットで質問できる最小 UI。
+
+- **Ollama でストリーミング生成**（`qwen2.5:7b` デフォルト。`CHAT_MODEL` で変更可）
+- ページ右上でペルソナ（優しい先輩 / 厳しい先生 / やさしく説明）と言語（日本語 / English）を切替可
+- 回答の根拠チャンクを「ソース」チップで表示。クリックで原文モーダルを開く
+- 会話履歴を localStorage に保持（ページリロード後も復元）
+- Markdown レンダリング対応（marked.js）
+
+```
+http://localhost:8000/chat.html
+```
+
+> **速度について**: Docker 内 Ollama は Metal GPU が使えず CPU 動作。速度を優先するには
+> native Ollama（`ollama serve`）を使い `OLLAMA_HOST=http://localhost:11434` を `.env` に設定する。
 
 ## セキュリティ / データ取り扱いルール（厳守）
 
@@ -169,6 +189,12 @@ workers/
   extract/        # ① PyMuPDF 抽出
   chunk/          # ② チャンク（サイズ可変）
   embed/          # ③ 埋め込み + 格納（Embedder/VectorStore 抽象化）
+webui/
+  server.py       # Starlette アプリ（アップロード API + RAG チャット SSE）
+  static/
+    index.html    # アップロード UI
+    chat.html     # RAG チャット UI
+    chat.js       # チャット fetch/SSE クライアント
 infra/db/         # pgvector スキーマ（開発/本番共通）
 docker/           # docker-compose.yml（postgres + Ollama）
 tests/fixtures/   # 著作権フリーのテスト用データ（コミット可）

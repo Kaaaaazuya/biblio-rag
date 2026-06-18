@@ -13,6 +13,7 @@ load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
 EMBED_MODEL = os.getenv("EMBED_MODEL", "bge-m3")
 EMBED_DIM = int(os.getenv("EMBED_DIM", "1024"))
+CHAT_MODEL = os.getenv("CHAT_MODEL", "qwen2.5:7b")
 
 # EMBED_BACKEND=bedrock のとき BedrockEmbedder を使う（デフォルトは ollama）
 EMBED_BACKEND = os.getenv("EMBED_BACKEND", "ollama")

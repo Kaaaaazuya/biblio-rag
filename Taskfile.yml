@@ -27,6 +27,10 @@ tasks:
     desc: "埋め込みモデル bge-m3 を取得（初回のみ・約 1.2GB）"
     cmd: "{{.COMPOSE}} exec ollama ollama pull bge-m3"
 
+  pull-chat-model:
+    desc: "チャットモデル qwen2.5:7b を取得（初回のみ・約 4.7GB）"
+    cmd: "{{.COMPOSE}} exec ollama ollama pull qwen2.5:7b"
+
   # ─── パイプライン ────────────────────────────────────────────────────────────
 
   upload:
