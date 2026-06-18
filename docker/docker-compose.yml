@@ -56,6 +56,25 @@ services:
     volumes:
       - minio:/data
 
+  # 2nd ステージ用のローカル AWS（S3 + SQS + Lambda）。Terraform でリソースを作る。
+  # Lambda は LocalStack が Docker コンテナとして spawn する（要 docker.sock）。
+  # spawn される Lambda は LAMBDA_DOCKER_NETWORK で本 compose 網に参加し、
+  # db(pgvector) / ollama / localstack をサービス名で解決できる。
+  localstack:
+    # community 版を固定（:latest は Pro ライセンストークンを要求して起動失敗する）。
+    # S3 / SQS / Lambda はいずれも community で利用可能。
+    image: localstack/localstack:3.8
+    container_name: biblio-localstack
+    restart: unless-stopped
+    ports:
+      - "4566:4566"
+    environment:
+      # SERVICES は絞らない（lambda が依存する iam/sts も community で必要）。
+      LAMBDA_DOCKER_NETWORK: "biblio-net"
+      DEBUG: "1"
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock"
+
   # 起動時にバケットを作る一度きりのジョブ（mc）。作成後に exit 0。
   createbuckets:
     image: minio/mc:latest
@@ -74,3 +93,8 @@ volumes:
   pgdata:
   ollama:
   minio:
+
+# 既定ネットワークを固定名にする（LocalStack の LAMBDA_DOCKER_NETWORK と一致させるため）。
+networks:
+  default:
+    name: biblio-net

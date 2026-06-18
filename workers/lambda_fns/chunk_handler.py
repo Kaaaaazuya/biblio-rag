@@ -36,5 +36,6 @@ def handler(event: dict, context=None) -> None:
         finally:
             pg.close()
 
-        for i, batch in enumerate(batched(records, SPLIT_SIZE, strict=False)):
+        # strict= は 3.13+。Lambda ランタイム(3.12)互換のため付けない。
+        for i, batch in enumerate(batched(records, SPLIT_SIZE)):  # noqa: B911
             store.put_jsonl(f"chunks/{book_id}/{i:04d}.jsonl", list(batch))
