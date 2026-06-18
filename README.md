@@ -13,6 +13,41 @@
 
 ---
 
+## アーキテクチャ
+
+```mermaid
+flowchart TB
+    PDF["📄 PDF"]
+
+    subgraph PIPE["取り込みパイプライン（task ingest）"]
+        EX["① Extract\nPyMuPDF"]
+        CH["② Chunk\n文字数分割"]
+        EM["③ Embed\nOllama bge-m3"]
+    end
+
+    subgraph STORE["ストレージ"]
+        S3[("☁️ MinIO / S3\nnormalized / chunks")]
+        PG[("🗄️ pgvector\n1024次元")]
+    end
+
+    subgraph CHAT["RAG チャット（/chat.html）"]
+        BR["🌐 ブラウザ"]
+        SV["server.py\n/api/chat"]
+        GEN["Ollama\nqwen2.5:7b"]
+    end
+
+    PDF -->|"presigned PUT"| S3
+    S3 --> EX --> CH --> EM -->|"upsert"| PG
+
+    BR -->|"POST /api/chat"| SV
+    SV -->|"embed + search\nbge-m3"| PG
+    PG -->|"Top-K chunks"| SV
+    SV -->|"prompt +\ncontext"| GEN
+    GEN -->|"SSE stream"| BR
+```
+
+---
+
 ## 必要なツール（前提）
 
 | ツール | 用途 | 確認 |
