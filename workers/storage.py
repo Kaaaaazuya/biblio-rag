@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import json
+import unicodedata
 from pathlib import Path
 from urllib.parse import unquote
 
@@ -72,6 +73,31 @@ class ObjectStore:
         return [json.loads(line) for line in self.get_text(key).splitlines() if line.strip()]
 
     def get_meta(self, key: str) -> dict[str, str]:
-        """raw PDF の S3 object metadata から title/author を URL デコードして返す。"""
-        raw = self.client.head_object(Bucket=self.bucket, Key=key).get("Metadata", {})
+        """raw PDF の S3 object metadata から title/author を URL デコードして返す。
+
+        macOS は NFD でキーを保存するが入力が NFC になる場合があるため、
+        NFC 正規化して一致するキーを検索する。
+        """
+        actual_key = self._resolve_key(key)
+        if actual_key is None:
+            return {}
+        raw = self.client.head_object(Bucket=self.bucket, Key=actual_key).get("Metadata", {})
         return {k: unquote(raw[k]) for k in _META_KEYS if k in raw}
+
+    def _resolve_key(self, key: str) -> str | None:
+        """NFC 正規化で一致する実際の S3 キーを返す。完全一致を先に試みる。"""
+        # まず完全一致（高速パス）
+        try:
+            self.client.head_object(Bucket=self.bucket, Key=key)
+            return key
+        except self.client.exceptions.ClientError:
+            pass
+        # NFD/NFC の不一致を吸収するためにリストから検索
+        target = unicodedata.normalize("NFC", key)
+        prefix = str(Path(key).parent) + "/"
+        if prefix == "./":
+            prefix = ""
+        for k in self.list_keys(prefix):
+            if unicodedata.normalize("NFC", k) == target:
+                return k
+        return None
