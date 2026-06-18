@@ -3,6 +3,26 @@ resource "aws_s3_bucket" "biblio" {
   bucket = var.bucket
 }
 
+# パブリックアクセスを全面ブロック（取り込みは presigned URL のみ）
+resource "aws_s3_bucket_public_access_block" "biblio" {
+  bucket                  = aws_s3_bucket.biblio.id
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
+# 保管時暗号化（マネージドキー SSE-S3）。CMK(KMS) はコスト/鍵管理が増えるため本番のコスト判断で検討。
+#tfsec:ignore:aws-s3-encryption-customer-key
+resource "aws_s3_bucket_server_side_encryption_configuration" "biblio" {
+  bucket = aws_s3_bucket.biblio.id
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm = "AES256"
+    }
+  }
+}
+
 # ── SQS: 3段（raw / norm / chunks）+ 各 DLQ ──
 locals {
   stages = {
@@ -13,14 +33,16 @@ locals {
 }
 
 resource "aws_sqs_queue" "dlq" {
-  for_each = local.stages
-  name     = "biblio-${each.key}-dlq"
+  for_each                = local.stages
+  name                    = "biblio-${each.key}-dlq"
+  sqs_managed_sse_enabled = true
 }
 
 resource "aws_sqs_queue" "stage" {
   for_each                   = local.stages
   name                       = "biblio-${each.key}"
   visibility_timeout_seconds = 360
+  sqs_managed_sse_enabled    = true
   redrive_policy = jsonencode({
     deadLetterTargetArn = aws_sqs_queue.dlq[each.key].arn
     maxReceiveCount     = 3

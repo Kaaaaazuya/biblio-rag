@@ -74,7 +74,7 @@
 - [ ] **`PgVectorStore` トランザクションモード対応**：`autocommit=False` オプション。分割並列設計では不要（chunk が一度だけ DELETE→embed は upsert のみ）。非分割の単一 embed を採る場合に追加。
 
 ### Phase B-local：Terraform + LocalStack でローカル検証 ✅ 完了
-> LocalStack community で S3→SQS→Lambda→pgvector を一気通貫で確認。`scripts/2nd_local.sh` / `tests/test_localstack_e2e.py`（マーカー `localstack`）。
+> LocalStack community で S3→SQS→Lambda→pgvector を一気通貫で確認。ランブック: [docs/2nd-local.md](docs/2nd-local.md)。`scripts/2nd_local.sh` / `tests/test_localstack_e2e.py`（マーカー `localstack`）。
 > **community の制約**：Lambda は **zip のみ**（コンテナイメージは Pro）／ランタイム上限 **python3.12**／**Aurora/RDS Proxy 非対応** → ローカル DB は既存 pgvector コンテナを流用。
 - [x] **Terraform プロジェクト**：`infra/terraform/`（provider は LocalStack エンドポイント・ダミー資格情報）。
 - [x] **S3 バケット + イベント通知**：プレフィックスごと（raw/ norm/ chunks/）に S3 Event → 対応 SQS。
