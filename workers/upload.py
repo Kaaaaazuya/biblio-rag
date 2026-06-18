@@ -7,6 +7,8 @@
 CLI:
   uv run python -m workers.upload book.pdf --title "書名" --author "著者名"
   uv run python -m workers.upload a.pdf b.pdf            # 複数可（メタは別途用意）
+  uv run python -m workers.upload --book-id mybook --title "書名" --author "著者名"
+    # PDF 再アップロードなしでメタデータだけ更新（S3 copy_object）
   → s3://<bucket>/raw/<ファイル名> に配置（book_id = ファイル名 stem）
 """
 
@@ -22,13 +24,47 @@ from workers.storage import RAW_PREFIX, ObjectStore
 
 def _cli(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description="raw PDF を S3(MinIO) にアップロード")
-    parser.add_argument("paths", nargs="+", help="アップロードする PDF")
+    parser.add_argument("paths", nargs="*", help="アップロードする PDF")
     parser.add_argument("--title", help="書名（S3 object metadata に記録）")
     parser.add_argument("--author", help="著者名（--title と併用）")
+    parser.add_argument(
+        "--book-id",
+        help="既存オブジェクトのメタデータのみ更新（PDF 再アップロードなし）",
+    )
     args = parser.parse_args(argv)
 
     if (args.title is None) != (args.author is None):
         print("--title と --author は両方指定してください", file=sys.stderr)
+        return 1
+
+    store = ObjectStore()
+
+    # --book-id のみ: 既存 S3 オブジェクトのメタデータを copy_object で上書き
+    if args.book_id:
+        if args.paths:
+            print("--book-id 指定時は PDF パスを指定しないでください", file=sys.stderr)
+            return 1
+        if not args.title:
+            print("--book-id には --title/--author も必要です", file=sys.stderr)
+            return 1
+        key = f"{RAW_PREFIX}{args.book_id}.pdf"
+        metadata = {"title": quote(args.title), "author": quote(args.author)}
+        try:
+            store.client.copy_object(
+                Bucket=store.bucket,
+                CopySource={"Bucket": store.bucket, "Key": key},
+                Key=key,
+                Metadata=metadata,
+                MetadataDirective="REPLACE",
+            )
+        except Exception as e:  # noqa: BLE001
+            print(f"メタデータ更新失敗: {e}", file=sys.stderr)
+            return 1
+        print(f"メタデータ更新: s3://{store.bucket}/{key} (title={args.title})")
+        return 0
+
+    if not args.paths:
+        print("PDF ファイルを指定してください", file=sys.stderr)
         return 1
     if args.title is not None and len(args.paths) != 1:
         print("--title/--author 指定時は PDF を 1 つだけ指定してください", file=sys.stderr)
@@ -39,7 +75,6 @@ def _cli(argv: list[str]) -> int:
         # S3 object metadata は US-ASCII のみ → 日本語を URL エンコード
         metadata = {"title": quote(args.title), "author": quote(args.author)}
 
-    store = ObjectStore()
     for arg in args.paths:
         path = Path(arg)
         if not path.is_file():
