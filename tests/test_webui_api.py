@@ -1,7 +1,5 @@
 """WebUI バックエンドのテスト（presign は署名のみでオフライン・MinIO 不要）。"""
 
-import json
-
 from starlette.testclient import TestClient
 
 from webui import server
@@ -30,16 +28,24 @@ def test_presign_sanitizes_path_traversal():
     assert res.json()["key"] == "raw/passwd.pdf"
 
 
-def test_meta_writes_sidecar(tmp_path, monkeypatch):
-    monkeypatch.setattr(server, "BOOKS_DIR", tmp_path)
-    res = client.post("/api/meta", json={"book_id": "mybook", "title": "書名", "author": "著者"})
+def test_meta_updates_s3_metadata():
+    from unittest.mock import MagicMock, patch
+    from urllib.parse import unquote
+
+    mock_s3 = MagicMock()
+    with patch("workers.config.s3_client", return_value=mock_s3):
+        res = client.post(
+            "/api/meta", json={"book_id": "mybook", "title": "書名", "author": "著者"}
+        )
     assert res.status_code == 200
-    data = json.loads((tmp_path / "mybook.meta.json").read_text(encoding="utf-8"))
-    assert data == {"title": "書名", "author": "著者"}
+    mock_s3.copy_object.assert_called_once()
+    kw = mock_s3.copy_object.call_args.kwargs
+    assert kw["MetadataDirective"] == "REPLACE"
+    assert unquote(kw["Metadata"]["title"]) == "書名"
+    assert unquote(kw["Metadata"]["author"]) == "著者"
 
 
-def test_meta_requires_title_author(tmp_path, monkeypatch):
-    monkeypatch.setattr(server, "BOOKS_DIR", tmp_path)
+def test_meta_requires_title_author():
     res = client.post("/api/meta", json={"book_id": "x", "title": "", "author": "a"})
     assert res.status_code == 400
 
