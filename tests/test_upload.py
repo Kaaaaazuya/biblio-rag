@@ -1,13 +1,25 @@
-"""アップロード補助のメタデータ書き出しテスト（S3 不要）。"""
+"""アップロード補助の CLI テスト（S3 不要）。"""
 
-import json
+from unittest.mock import MagicMock, patch
 
 from workers import upload
 
 
-def test_write_meta_creates_sidecar(tmp_path, monkeypatch):
-    monkeypatch.setattr(upload, "BOOKS_DIR", tmp_path)
-    path = upload._write_meta("mybook", "書名", "著者名")
-    assert path == tmp_path / "mybook.meta.json"
-    data = json.loads(path.read_text(encoding="utf-8"))
-    assert data == {"title": "書名", "author": "著者名"}
+def test_upload_passes_metadata_to_store(tmp_path):
+    """--title/--author が S3 object metadata として渡ることを確認。"""
+    pdf = tmp_path / "mybook.pdf"
+    pdf.write_bytes(b"%PDF-1.4 test")
+
+    mock_store = MagicMock()
+    with patch("workers.upload.ObjectStore", return_value=mock_store):
+        rc = upload._cli([str(pdf), "--title", "書名", "--author", "著者名"])
+
+    assert rc == 0
+    call_kwargs = mock_store.put_file.call_args
+    metadata = call_kwargs.kwargs.get("metadata") or call_kwargs.args[2]
+    assert metadata is not None
+    # 値は URL エンコード済み（ASCII）
+    from urllib.parse import unquote
+
+    assert unquote(metadata["title"]) == "書名"
+    assert unquote(metadata["author"]) == "著者名"

@@ -37,8 +37,20 @@ class ObjectStore:
     def get_bytes(self, key: str) -> bytes:
         return self.client.get_object(Bucket=self.bucket, Key=key)["Body"].read()
 
-    def put_file(self, local_path: str | Path, key: str) -> None:
-        self.client.upload_file(str(local_path), self.bucket, key)
+    def put_file(
+        self, local_path: str | Path, key: str, metadata: dict[str, str] | None = None
+    ) -> None:
+        kwargs = {}
+        if metadata:
+            kwargs["ExtraArgs"] = {"Metadata": metadata}
+        self.client.upload_file(str(local_path), self.bucket, key, **kwargs)
+
+    def key_exists(self, key: str) -> bool:
+        try:
+            self.client.head_object(Bucket=self.bucket, Key=key)
+            return True
+        except self.client.exceptions.ClientError:
+            return False
 
     def put_bytes(self, key: str, data: bytes, metadata: dict[str, str] | None = None) -> None:
         kwargs = {"Bucket": self.bucket, "Key": key, "Body": data}

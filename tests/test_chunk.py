@@ -3,7 +3,7 @@
 import pytest
 
 from workers.chunk import chunk_markdown
-from workers.chunk.chunk import _load_meta, _split_text
+from workers.chunk.chunk import _split_text
 
 META = {"book_id": "sample_book", "title": "テスト書", "author": "テスト著者"}
 
@@ -95,12 +95,6 @@ def test_split_text_long_sentence_without_period_terminates():
     assert len(chunks) >= 3
     assert all(len(c) <= 75 for c in chunks)  # size*1.5 を大きく超えない
     assert "".join(c[:40] for c in chunks).count("あ") > 0  # 文字が失われない
-
-
-def test_load_meta_missing_raises():
-    # サイドカーが無ければ FileNotFoundError（CLI 側はこれを捕捉してスキップ）
-    with pytest.raises(FileNotFoundError):
-        _load_meta("definitely-missing-book-xyz")
 
 
 def test_no_heading_body_has_no_prefix():

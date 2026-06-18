@@ -21,7 +21,7 @@ from pathlib import Path
 import fitz
 import pymupdf4llm.helpers.pymupdf_rag as _rag
 
-OUT_DIR = Path("books/normalized")
+NORM_PREFIX = "normalized/"
 
 HEADER_BAND = 0.07
 FOOTER_BAND = 0.93
@@ -86,28 +86,26 @@ def extract_pdf_to_markdown(src: str | Path | bytes) -> str:
     return "\n\n".join(parts) + "\n"
 
 
-def _write_md(stem: str, md: str, source: str) -> None:
-    out = OUT_DIR / f"{stem}.md"
-    out.write_text(md, encoding="utf-8")
-    print(f"{source} -> {out} ({len(md)} chars)")
-
-
 def _cli(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description="① 抽出: PDF → 構造つき Markdown")
     parser.add_argument("paths", nargs="*", help="ローカル PDF（省略時は S3 の raw/ を処理）")
     parser.add_argument("--force", action="store_true", help="処理済み(.md)も再生成（洗い替え）")
     args = parser.parse_args(argv)
-    OUT_DIR.mkdir(parents=True, exist_ok=True)
-
-    if args.paths:
-        for arg in args.paths:
-            pdf = Path(arg)
-            _write_md(pdf.stem, extract_pdf_to_markdown(pdf), str(pdf))
-        return 0
 
     from workers.storage import ObjectStore
 
     store = ObjectStore()
+
+    if args.paths:
+        for arg in args.paths:
+            pdf = Path(arg)
+            stem = pdf.stem
+            norm_key = f"{NORM_PREFIX}{stem}.md"
+            md = extract_pdf_to_markdown(pdf)
+            store.put_text(norm_key, md)
+            print(f"{pdf} -> s3://{store.bucket}/{norm_key} ({len(md)} chars)")
+        return 0
+
     keys = store.list_pdfs()
     if not keys:
         print(
@@ -118,12 +116,13 @@ def _cli(argv: list[str]) -> int:
         return 1
     for key in keys:
         stem = Path(key).stem
-        out = OUT_DIR / f"{stem}.md"
-        if out.exists() and not args.force:
-            print(f"スキップ（既存）: {out.name}")
+        norm_key = f"{NORM_PREFIX}{stem}.md"
+        if not args.force and store.key_exists(norm_key):
+            print(f"スキップ（既存）: {norm_key}")
             continue
         md = extract_pdf_to_markdown(store.get_bytes(key))
-        _write_md(stem, md, f"s3://{store.bucket}/{key}")
+        store.put_text(norm_key, md)
+        print(f"s3://{store.bucket}/{key} -> s3://{store.bucket}/{norm_key} ({len(md)} chars)")
     return 0
 
 

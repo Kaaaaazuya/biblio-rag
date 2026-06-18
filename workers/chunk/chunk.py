@@ -6,26 +6,23 @@
   - 見出し境界を尊重（見出しをまたいでチャンクしない）
   - 見出し階層を prefix として本文頭に付与（例「第一章 設計の前提 > 1.1 目的とスコープ」）
   - メタデータ付与: book_id / title / author / chapter / section / page / text
-    （title・author は必須。page は MVP では null・表示の余地として列は残す）
+    （title・author は必須。S3 object metadata から取得）
 
-CLI: uv run python -m workers.chunk            # books/normalized/*.md → books/chunks/*.jsonl
-     uv run python -m workers.chunk a.md --size 600 --overlap 100
-メタデータは books/<stem>.meta.json（{"title": ..., "author": ...}）から読む。
+CLI: uv run python -m workers.chunk            # S3 normalized/ の .md をすべて処理
+     uv run python -m workers.chunk mybook --size 600 --overlap 100  # book_id 指定
 """
 
 from __future__ import annotations
 
 import argparse
-import json
 import re
 import sys
 from pathlib import Path
 
 from .base import Chunker
 
-NORM_DIR = Path("books/normalized")
-OUT_DIR = Path("books/chunks")
-BOOKS_DIR = Path("books")
+NORM_PREFIX = "normalized/"
+CHUNKS_PREFIX = "chunks/"
 
 DEFAULT_SIZE = 800
 DEFAULT_OVERLAP = 120
@@ -222,59 +219,55 @@ def chunk_markdown(
     return HeuristicChunker(size, overlap).chunk(md, meta)
 
 
-def _load_meta(stem: str) -> dict:
-    """books/<stem>.meta.json から title / author を読み、book_id を補う。"""
-    meta_path = BOOKS_DIR / f"{stem}.meta.json"
-    if not meta_path.exists():
-        raise FileNotFoundError(
-            f"メタデータが見つかりません: {meta_path}（{{'title':..., 'author':...}} を用意）"
-        )
-    meta = json.loads(meta_path.read_text(encoding="utf-8"))
-    meta.setdefault("book_id", stem)
-    return meta
-
-
 def _cli(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description="② チャンク: Markdown → JSONL")
-    parser.add_argument("paths", nargs="*", help="対象 .md（省略時は books/normalized/*.md）")
+    parser.add_argument("book_ids", nargs="*", help="book_id（省略時は S3 normalized/ を一括処理）")
     parser.add_argument("--size", type=int, default=DEFAULT_SIZE)
     parser.add_argument("--overlap", type=int, default=DEFAULT_OVERLAP)
     parser.add_argument("--force", action="store_true", help="処理済み(.jsonl)も再生成（洗い替え）")
     args = parser.parse_args(argv)
 
-    is_batch = not args.paths
-    paths = [Path(p) for p in args.paths] if args.paths else sorted(NORM_DIR.glob("*.md"))
-    if not paths:
-        print(f"Markdown が見つかりません（{NORM_DIR}/*.md または引数で指定）", file=sys.stderr)
-        return 1
+    from workers.storage import ObjectStore
 
-    chunker = HeuristicChunker(args.size, args.overlap)  # size/overlap はここで検証
-    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    store = ObjectStore()
+    chunker = HeuristicChunker(args.size, args.overlap)
+
+    if args.book_ids:
+        book_ids = args.book_ids
+    else:
+        norm_keys = [k for k in store.list_keys(NORM_PREFIX) if k.endswith(".md")]
+        if not norm_keys:
+            print(f"S3 に Markdown がありません（{store.bucket}/{NORM_PREFIX}）", file=sys.stderr)
+            return 1
+        book_ids = [Path(k).stem for k in norm_keys]
+
     skipped: list[str] = []
-    for md_path in paths:
-        out = OUT_DIR / f"{md_path.stem}.jsonl"
-        # 既定: 一括実行で既存の .jsonl はスキップ（--force で洗い替え）
-        if is_batch and out.exists() and not args.force:
-            print(f"スキップ（既存）: {out.name}")
+    for book_id in book_ids:
+        norm_key = f"{NORM_PREFIX}{book_id}.md"
+        chunks_key = f"{CHUNKS_PREFIX}{book_id}.jsonl"
+        if not args.force and not args.book_ids and store.key_exists(chunks_key):
+            print(f"スキップ（既存）: {chunks_key}")
             continue
         try:
-            meta = _load_meta(md_path.stem)
-            records = chunker.chunk(md_path.read_text(encoding="utf-8"), meta)
-        except (FileNotFoundError, ValueError) as e:
-            # メタ未整備の本は止めずにスキップ（他の本は処理する）
-            print(f"スキップ {md_path.name}: {e}", file=sys.stderr)
-            skipped.append(md_path.stem)
+            md = store.get_text(norm_key)
+            meta = store.get_meta(f"raw/{book_id}.pdf")
+            meta["book_id"] = book_id
+            records = chunker.chunk(md, meta)
+        except ValueError as e:
+            print(f"スキップ {book_id}: {e}", file=sys.stderr)
+            skipped.append(book_id)
             continue
-        with out.open("w", encoding="utf-8") as f:
-            for rec in records:
-                f.write(json.dumps(rec, ensure_ascii=False) + "\n")
-        print(f"{md_path} -> {out} ({len(records)} chunks)")
+        store.put_jsonl(chunks_key, records)
+        print(
+            f"s3://{store.bucket}/{norm_key} -> s3://{store.bucket}/{chunks_key}"
+            f" ({len(records)} chunks)"
+        )
 
     if skipped:
         print(
             f"\nメタデータ未整備で {len(skipped)} 冊スキップ: {', '.join(skipped)}\n"
-            "  対処: books/<book_id>.meta.json を用意するか、アップロード時に\n"
-            "  `workers.upload <pdf> --title ... --author ...` を指定して再実行してください",
+            "  対処: アップロード時に"
+            " `workers.upload <pdf> --title ... --author ...` を指定して再実行してください",
             file=sys.stderr,
         )
         return 1
