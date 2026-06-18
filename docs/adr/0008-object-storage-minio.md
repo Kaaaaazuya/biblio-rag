@@ -20,6 +20,7 @@ git リポジトリだと、Web 配信・本番運用に繋がらない。Design
 - アクセスは `workers/storage.py` の `ObjectStore` を介する。`workers.extract` は既定で
   S3 の `raw/` から PDF を取得する（ローカルパス引数も併用可）。投入補助に `workers.upload`。
 - **まずは raw PDF のみ**を対象とし、`normalized/*.md`・`chunks/*.jsonl` は当面ローカル FS に置く。
+- **追記 (2026-06-18)**: `normalized/` と `chunks/` も `ObjectStore` 経由で S3 に移行済み（`put_text` / `get_text` / `put_jsonl` / `load_jsonl`）。開発・本番ともに raw/normalized/chunks のすべてが MinIO/S3 上で完結する。
 
 ## 理由
 
@@ -30,7 +31,6 @@ git リポジトリだと、Web 配信・本番運用に繋がらない。Design
 ## 結果
 
 - 良い点: アップロード起点が本番と同じ S3 API になり、WebUI 化の布石になる。dev/本番でコード共通。
-- 悪い点: 開発時も MinIO 起動が前提になる。保存先が **S3(raw) と FS(normalized/chunks) で混在**する。
-- 継ぎ目: 将来 normalized/chunks も S3 へ寄せる際は `ObjectStore` を拡張して各ワーカーを差し替える
-  （`Embedder`/`VectorStore`/`Chunker` と同じ抽象化の流れ）。
+- 悪い点: 開発時も MinIO 起動が前提になる。当初は raw のみ S3 で normalized/chunks がローカル FS と混在した。
+- 継ぎ目 → **完了 (2026-06-18)**: normalized/chunks も `ObjectStore` 経由で S3 へ移行。raw/normalized/chunks すべてが S3 上で完結し混在が解消された。
 - 認証: 開発は MinIO のダミー資格情報（`minioadmin`）を `.env` に置く。本番は実キーを置かず IAM ロール。
