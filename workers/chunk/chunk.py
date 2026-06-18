@@ -266,8 +266,12 @@ def _cli(argv: list[str]) -> int:
     if skipped:
         print(
             f"\nメタデータ未整備で {len(skipped)} 冊スキップ: {', '.join(skipped)}\n"
-            "  対処: アップロード時に"
-            " `workers.upload <pdf> --title ... --author ...` を指定して再実行してください",
+            "  対処: 以下のコマンドで S3 object metadata に書誌情報を登録してください:\n"
+            + "".join(
+                f"    uv run python -m workers.upload --book-id {bid}"
+                f' --title "書名" --author "著者名"\n'
+                for bid in skipped
+            ),
             file=sys.stderr,
         )
         return 1
