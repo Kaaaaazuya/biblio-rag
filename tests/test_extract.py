@@ -98,3 +98,25 @@ def test_extract_accepts_bytes():
     # S3 から取得した PDF バイト列を直接渡せる（MinIO 経由のパス）
     md = extract_pdf_to_markdown(_ensure_fixture().read_bytes())
     assert "# RAG 取り込みパイプライン" in md
+
+
+def test_empty_table_fallback(monkeypatch):
+    """pymupdf_rag が空テーブルで ValueError を投げたとき、ページ単位で再処理できる。"""
+    import workers.extract.extract as ext
+
+    call_count = [0]
+    real_to_markdown = ext._rag.to_markdown
+
+    def patched(doc, pages=None, **kwargs):
+        call_count[0] += 1
+        if pages is None:
+            # 一括呼び出し: ライブラリバグをシミュレート
+            raise ValueError("min() iterable argument is empty")
+        # ページ単位のフォールバック呼び出し: 実際に変換
+        return real_to_markdown(doc, pages=pages, **kwargs)
+
+    monkeypatch.setattr(ext._rag, "to_markdown", patched)
+
+    md = extract_pdf_to_markdown(_ensure_fixture())
+    assert "# RAG 取り込みパイプライン" in md  # コンテンツは正常に取得できる
+    assert call_count[0] > 1  # フォールバックで複数回呼ばれた
