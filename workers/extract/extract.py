@@ -69,15 +69,23 @@ def extract_pdf_to_markdown(src: str | Path | bytes) -> str:
         median_h = sorted(doc[i].rect.height for i in range(doc.page_count))[doc.page_count // 2]
         top_margin = median_h * HEADER_BAND
         bot_margin = median_h * (1 - FOOTER_BAND)
+        margins = (0, top_margin, 0, bot_margin)
 
-        pages = _rag.to_markdown(
-            doc,
-            page_chunks=True,
-            margins=(0, top_margin, 0, bot_margin),
-        )
+        try:
+            indexed = list(enumerate(_rag.to_markdown(doc, page_chunks=True, margins=margins)))
+        except ValueError:
+            # pymupdf_rag が空テーブルセルで ValueError を出すライブラリのバグへの回避策。
+            # ページ単位で再処理し、問題ページだけスキップする。
+            indexed = []
+            for i in range(doc.page_count):
+                try:
+                    result = _rag.to_markdown(doc, pages=[i], page_chunks=True, margins=margins)
+                    indexed.append((i, result[0]))
+                except ValueError:
+                    pass
 
     parts: list[str] = []
-    for i, page in enumerate(pages):
+    for i, page in indexed:
         text = _join_wrapped_lines(page["text"])
         if text.strip():
             parts.append(f"<!-- page:{i + 1} -->")
