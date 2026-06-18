@@ -2,7 +2,7 @@
 
 設計（本番にそのまま乗る形）:
   - ファイル本体はバックエンドを経由せず、ブラウザから **presigned URL で S3(MinIO) に直接 PUT**。
-  - バックエンドは「署名の発行」と「メタデータ(title/author)の保存」だけを担う軽量 API。
+  - バックエンドは「署名の発行」と「メタデータ(title/author)の S3 保存」だけを担う軽量 API。
   - フロントは `webui/static/` の静的ファイル（HTML/JS）。
   - フレームワークは Starlette（軽量・pydantic 非依存）。
 
@@ -12,10 +12,10 @@
 
 from __future__ import annotations
 
-import json
 import re
 import threading
 from pathlib import Path
+from urllib.parse import quote
 
 from starlette.applications import Starlette
 from starlette.background import BackgroundTasks
@@ -28,7 +28,6 @@ from workers import config
 from workers.storage import RAW_PREFIX
 
 STATIC_DIR = Path(__file__).parent / "static"
-BOOKS_DIR = Path("books")
 
 # 取り込みステータスのインメモリストア（プロセス再起動でリセット）
 _status: dict[str, dict] = {}
@@ -43,32 +42,31 @@ def _set_status(book_id: str, status: str, error: str | None = None) -> None:
 def _run_pipeline(book_id: str) -> None:
     """extract → chunk → embed を同期実行する。BackgroundTask から呼ばれる。"""
     try:
-        from workers.chunk.chunk import chunk_markdown
+        from workers.chunk.chunk import HeuristicChunker
         from workers.embed.pgvector_store import PgVectorStore
-        from workers.embed.pipeline import embed_and_store
+        from workers.embed.pipeline import active_embed_model, embed_and_store, make_embedder
         from workers.extract.extract import extract_pdf_to_markdown
         from workers.storage import ObjectStore
 
         _set_status(book_id, "extracting")
-        obj = ObjectStore()
-        pdf_bytes = obj.get_bytes(f"{RAW_PREFIX}{book_id}.pdf")
+        store = ObjectStore()
+        pdf_bytes = store.get_bytes(f"{RAW_PREFIX}{book_id}.pdf")
         md = extract_pdf_to_markdown(pdf_bytes)
+        store.put_text(f"normalized/{book_id}.md", md)
 
         _set_status(book_id, "chunking")
-        meta_path = BOOKS_DIR / f"{book_id}.meta.json"
-        meta = json.loads(meta_path.read_text(encoding="utf-8"))
-        meta.setdefault("book_id", book_id)
-        records = chunk_markdown(md, meta)
+        meta = store.get_meta(f"{RAW_PREFIX}{book_id}.pdf")
+        meta["book_id"] = book_id
+        records = HeuristicChunker().chunk(md, meta)
+        store.put_jsonl(f"chunks/{book_id}.jsonl", records)
 
         _set_status(book_id, "embedding")
-        from workers.embed.pipeline import active_embed_model, make_embedder
-
         embedder = make_embedder()
-        store = PgVectorStore(config.database_url())
+        vec_store = PgVectorStore(config.database_url())
         try:
-            embed_and_store(records, embedder, store, embed_model=active_embed_model())
+            embed_and_store(records, embedder, vec_store, embed_model=active_embed_model())
         finally:
-            store.close()
+            vec_store.close()
 
         _set_status(book_id, "done")
     except Exception as e:  # noqa: BLE001
@@ -108,7 +106,11 @@ async def presign(request: Request) -> JSONResponse:
 
 
 async def save_meta(request: Request) -> JSONResponse:
-    """書籍メタデータ（title/author）をサイドカー JSON に保存する。"""
+    """書籍メタデータ（title/author）を S3 object metadata に保存する。
+
+    presigned URL でアップロード済みの raw PDF に copy_object で metadata を付与する。
+    S3 object metadata は US-ASCII のみ → 日本語は URL エンコード済みで格納。
+    """
     body = await request.json()
     title = (body.get("title") or "").strip()
     author = (body.get("author") or "").strip()
@@ -119,13 +121,19 @@ async def save_meta(request: Request) -> JSONResponse:
     except ValueError as e:
         return JSONResponse({"detail": str(e)}, status_code=400)
 
-    BOOKS_DIR.mkdir(parents=True, exist_ok=True)
-    path = BOOKS_DIR / f"{book_id}.meta.json"
-    path.write_text(
-        json.dumps({"title": title, "author": author}, ensure_ascii=False) + "\n",
-        encoding="utf-8",
-    )
-    return JSONResponse({"book_id": book_id, "meta": str(path)})
+    key = f"{RAW_PREFIX}{book_id}.pdf"
+    s3 = config.s3_client()
+    try:
+        s3.copy_object(
+            Bucket=config.S3_BUCKET,
+            CopySource={"Bucket": config.S3_BUCKET, "Key": key},
+            Key=key,
+            Metadata={"title": quote(title), "author": quote(author)},
+            MetadataDirective="REPLACE",
+        )
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"detail": f"メタデータ保存失敗: {e}"}, status_code=500)
+    return JSONResponse({"book_id": book_id})
 
 
 async def ingest(request: Request) -> JSONResponse:
