@@ -1,7 +1,7 @@
 from .base import Embedder, VectorStore
 from .ollama_embedder import OllamaEmbedder
 from .pgvector_store import PgVectorStore
-from .pipeline import embed_and_store, load_jsonl
+from .pipeline import embed_and_store
 
 __all__ = [
     "Embedder",
@@ -9,5 +9,4 @@ __all__ = [
     "OllamaEmbedder",
     "PgVectorStore",
     "embed_and_store",
-    "load_jsonl",
 ]

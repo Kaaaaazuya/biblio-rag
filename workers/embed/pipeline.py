@@ -1,21 +1,21 @@
 """③ パイプライン: chunks/*.jsonl を読み、埋め込み、pgvector に格納する。
 
-CLI: uv run python -m workers.embed            # books/chunks/*.jsonl をすべて格納
-     uv run python -m workers.embed a.jsonl
+CLI: uv run python -m workers.embed            # S3 chunks/ の .jsonl をすべて格納
+     uv run python -m workers.embed mybook     # book_id 指定
 """
 
 from __future__ import annotations
 
 import argparse
-import json
 import sys
-from pathlib import Path
 
 from workers import config
 
 from .base import Embedder, VectorStore
 from .ollama_embedder import OllamaEmbedder
 from .pgvector_store import PgVectorStore
+
+CHUNKS_PREFIX = "chunks/"
 
 
 def make_embedder() -> Embedder:
@@ -34,14 +34,6 @@ def active_embed_model() -> str:
     return config.EMBED_MODEL
 
 
-CHUNKS_DIR = Path("books/chunks")
-
-
-def load_jsonl(path: Path) -> list[dict]:
-    with path.open(encoding="utf-8") as f:
-        return [json.loads(line) for line in f if line.strip()]
-
-
 def embed_and_store(
     records: list[dict], embedder: Embedder, store: VectorStore, embed_model: str = ""
 ) -> int:
@@ -57,34 +49,40 @@ def embed_and_store(
 
 def _cli(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description="③ 埋め込み + 格納: JSONL → pgvector")
-    parser.add_argument("paths", nargs="*", help="対象 .jsonl（省略時は books/chunks/*.jsonl）")
+    parser.add_argument("book_ids", nargs="*", help="book_id（省略時は S3 chunks/ を一括処理）")
     parser.add_argument("--force", action="store_true", help="格納済みも再埋め込み（洗い替え）")
     args = parser.parse_args(argv)
 
-    is_batch = not args.paths
-    paths = [Path(p) for p in args.paths] if args.paths else sorted(CHUNKS_DIR.glob("*.jsonl"))
-    if not paths:
-        print(f"JSONL が見つかりません（{CHUNKS_DIR}/*.jsonl または引数で指定）", file=sys.stderr)
+    from workers.storage import ObjectStore
+
+    obj_store = ObjectStore()
+
+    if args.book_ids:
+        chunk_keys = [f"{CHUNKS_PREFIX}{bid}.jsonl" for bid in args.book_ids]
+    else:
+        chunk_keys = [k for k in obj_store.list_keys(CHUNKS_PREFIX) if k.endswith(".jsonl")]
+    if not chunk_keys:
+        print(f"S3 に JSONL がありません（{obj_store.bucket}/{CHUNKS_PREFIX}）", file=sys.stderr)
         return 1
 
+    is_batch = not args.book_ids
     embedder = make_embedder()
-    store = PgVectorStore(config.database_url())
+    vec_store = PgVectorStore(config.database_url())
     model_name = active_embed_model()
     try:
-        for path in paths:
-            records = load_jsonl(path)
+        for key in chunk_keys:
+            records = obj_store.load_jsonl(key)
             if not records:
                 continue
             book_id = records[0]["book_id"]
-            exists = store.count_book(book_id) > 0
-            # 既定: 一括実行で格納済みはスキップ（--force で洗い替え）
+            exists = vec_store.count_book(book_id) > 0
             if is_batch and exists and not args.force:
-                print(f"スキップ（格納済み）: {path.name} (book_id={book_id})")
+                print(f"スキップ（格納済み）: {key} (book_id={book_id})")
                 continue
             if exists:
-                store.delete_book(book_id)  # 再投入前に既存を消してクリーンに入れ直す
-            n = embed_and_store(records, embedder, store, embed_model=model_name)
-            print(f"{path} -> pgvector ({n} chunks)")
+                vec_store.delete_book(book_id)
+            n = embed_and_store(records, embedder, vec_store, embed_model=model_name)
+            print(f"s3://{obj_store.bucket}/{key} -> pgvector ({n} chunks)")
     finally:
-        store.close()
+        vec_store.close()
     return 0

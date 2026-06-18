@@ -1,8 +1,8 @@
 """raw PDF をオブジェクトストレージ（MinIO/S3）にアップロードする補助 CLI。
 
 将来は WebUI からのアップロードに置き換わる想定。手元の PDF を投入する用。
-アップロード時に --title/--author を渡すと、② チャンクに必須のメタデータ
-（books/<book_id>.meta.json）も同時に書き出す。
+アップロード時に --title/--author を渡すと、S3 object metadata に書誌情報を
+記録する（② チャンク層が参照する。日本語は URL エンコード済みで格納）。
 
 CLI:
   uv run python -m workers.upload book.pdf --title "書名" --author "著者名"
@@ -13,29 +13,17 @@ CLI:
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 from pathlib import Path
+from urllib.parse import quote
 
 from workers.storage import RAW_PREFIX, ObjectStore
-
-BOOKS_DIR = Path("books")
-
-
-def _write_meta(stem: str, title: str, author: str) -> Path:
-    BOOKS_DIR.mkdir(parents=True, exist_ok=True)
-    path = BOOKS_DIR / f"{stem}.meta.json"
-    path.write_text(
-        json.dumps({"title": title, "author": author}, ensure_ascii=False) + "\n",
-        encoding="utf-8",
-    )
-    return path
 
 
 def _cli(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description="raw PDF を S3(MinIO) にアップロード")
     parser.add_argument("paths", nargs="+", help="アップロードする PDF")
-    parser.add_argument("--title", help="書名（指定すると meta.json も書く）")
+    parser.add_argument("--title", help="書名（S3 object metadata に記録）")
     parser.add_argument("--author", help="著者名（--title と併用）")
     args = parser.parse_args(argv)
 
@@ -46,6 +34,11 @@ def _cli(argv: list[str]) -> int:
         print("--title/--author 指定時は PDF を 1 つだけ指定してください", file=sys.stderr)
         return 1
 
+    metadata = None
+    if args.title is not None:
+        # S3 object metadata は US-ASCII のみ → 日本語を URL エンコード
+        metadata = {"title": quote(args.title), "author": quote(args.author)}
+
     store = ObjectStore()
     for arg in args.paths:
         path = Path(arg)
@@ -53,11 +46,8 @@ def _cli(argv: list[str]) -> int:
             print(f"見つかりません: {path}", file=sys.stderr)
             return 1
         key = f"{RAW_PREFIX}{path.name}"
-        store.put_file(path, key)
+        store.put_file(path, key, metadata=metadata)
         print(f"{path} -> s3://{store.bucket}/{key}")
-        if args.title is not None:
-            meta = _write_meta(path.stem, args.title, args.author)
-            print(f"メタデータ -> {meta}")
     return 0
 
 
