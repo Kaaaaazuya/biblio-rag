@@ -12,15 +12,18 @@
 
 from __future__ import annotations
 
+import asyncio
+import json
 import re
 import threading
 from pathlib import Path
 from urllib.parse import quote
 
+import httpx
 from starlette.applications import Starlette
 from starlette.background import BackgroundTasks
 from starlette.requests import Request
-from starlette.responses import JSONResponse
+from starlette.responses import JSONResponse, StreamingResponse
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
@@ -80,6 +83,120 @@ def _safe_name(name: str) -> str:
     if not base or base in {".", ".."}:
         raise ValueError("不正なファイル名です")
     return base
+
+
+def _retrieve(query: str, top_k: int) -> list[dict]:
+    """クエリを埋め込み、pgvector から類似チャンクを取得する（同期・スレッドで実行）。"""
+    from workers.embed.ollama_embedder import OllamaEmbedder
+    from workers.embed.pgvector_store import PgVectorStore
+
+    embedder = OllamaEmbedder(config.OLLAMA_HOST, config.EMBED_MODEL, config.EMBED_DIM)
+    vec = embedder.embed([query])[0]
+    store = PgVectorStore(config.database_url())
+    try:
+        return store.search(vec, top_k=top_k)
+    finally:
+        store.close()
+
+
+_PERSONA_PREFIXES: dict[str, str] = {
+    "senior": (
+        "あなたは経験豊富で優しい先輩エンジニアです。"
+        "丁寧に、背景や理由も含めて説明してください。\n\n"
+    ),
+    "strict": (
+        "あなたは厳格な先生です。要点を簡潔に伝え、改善の余地があれば率直に指摘してください。\n\n"
+    ),
+    "simple": (
+        "あなたは親切な入門書の著者です。"
+        "専門用語は避け、具体例を使って初心者向けに説明してください。\n\n"
+    ),
+}
+
+_LANG_INSTRUCTIONS: dict[str, str] = {
+    "ja": "回答は必ず日本語で行ってください。",
+    "en": "You must respond in English.",
+}
+
+_SYSTEM_PROMPT = """\
+{persona}Answer questions based on the provided reference text.
+Use only the reference text below as the basis for your answer.
+If the answer is not found in the reference text, say so clearly.
+{lang}
+
+Reference text:
+{context}"""
+
+
+async def chat(request: Request) -> StreamingResponse:
+    """RAG チャット: クエリ埋め込み → pgvector 検索 → Ollama 生成（SSE ストリーム）。"""
+    body = await request.json()
+    query = (body.get("query") or "").strip()
+    history: list[dict] = body.get("history", [])
+    top_k: int = int(body.get("top_k", 5))
+    persona: str = body.get("persona", "")
+    lang: str = body.get("lang", "ja")
+
+    if not query:
+        return JSONResponse({"detail": "query は必須です"}, status_code=400)
+
+    loop = asyncio.get_event_loop()
+    chunks = await loop.run_in_executor(None, _retrieve, query, top_k)
+
+    context = "\n\n".join(
+        f"【{c.get('title', '')}｜{c.get('chapter', '')}】\n{c['text']}" for c in chunks
+    )
+    sources = [
+        {k: c.get(k) for k in ("title", "author", "chapter", "section", "page", "text")}
+        for c in chunks
+    ]
+    system_content = _SYSTEM_PROMPT.format(
+        persona=_PERSONA_PREFIXES.get(persona, ""),
+        lang=_LANG_INSTRUCTIONS.get(lang, _LANG_INSTRUCTIONS["ja"]),
+        context=context,
+    )
+    messages = [
+        {"role": "system", "content": system_content},
+        *history,
+        {"role": "user", "content": query},
+    ]
+
+    async def event_stream():
+        src_msg = json.dumps({"type": "sources", "sources": sources}, ensure_ascii=False)
+        yield f"data: {src_msg}\n\n"
+        try:
+            async with (
+                httpx.AsyncClient(timeout=120.0) as client,
+                client.stream(
+                    "POST",
+                    f"{config.OLLAMA_HOST}/api/chat",
+                    json={"model": config.CHAT_MODEL, "messages": messages, "stream": True},
+                ) as resp,
+            ):
+                async for line in resp.aiter_lines():
+                    if not line:
+                        continue
+                    try:
+                        data = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if err := data.get("error"):
+                        msg = json.dumps(
+                            {"type": "error", "message": f"Ollama: {err}"}, ensure_ascii=False
+                        )
+                        yield f"data: {msg}\n\n"
+                        return
+                    if content := data.get("message", {}).get("content", ""):
+                        msg = json.dumps({"type": "token", "content": content}, ensure_ascii=False)
+                        yield f"data: {msg}\n\n"
+                    if data.get("done"):
+                        yield f"data: {json.dumps({'type': 'done'})}\n\n"
+                        return
+        except Exception as e:  # noqa: BLE001
+            msg = json.dumps({"type": "error", "message": str(e)}, ensure_ascii=False)
+            yield f"data: {msg}\n\n"
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
 async def presign(request: Request) -> JSONResponse:
@@ -163,6 +280,7 @@ app = Starlette(
         Route("/api/meta", save_meta, methods=["POST"]),
         Route("/api/ingest", ingest, methods=["POST"]),
         Route("/api/ingest/{book_id}/status", ingest_status, methods=["GET"]),
+        Route("/api/chat", chat, methods=["POST"]),
         # 静的フロント（最後にマウント。html=True で / に index.html を返す）
         Mount("/", app=StaticFiles(directory=STATIC_DIR, html=True), name="static"),
     ]
