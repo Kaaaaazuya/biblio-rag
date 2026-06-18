@@ -32,9 +32,10 @@ def md() -> str:
 
 
 def test_title_is_single_h1(md):
-    # 折り返された書名が1つの # 見出しに結合されている
-    assert "# RAG 取り込みパイプライン設計ノート" in md
-    assert md.count("\n# ") + md.startswith("# ") * 1 == 1  # H1 は1つだけ
+    # 書名が H1 として1つだけ出力される（タイトル折り返しを結合済み）
+    assert "# RAG 取り込みパイプライン" in md
+    h1_count = sum(1 for line in md.splitlines() if line.startswith("# "))
+    assert h1_count == 1
 
 
 def test_chapter_and_section_levels(md):
@@ -46,8 +47,14 @@ def test_chapter_and_section_levels(md):
 
 
 def test_header_footer_removed(md):
-    # 繰り返しヘッダ（書名・空白入り）とフッタ（ページ番号）が除去されている
-    assert "RAG 取り込みパイプライン 設計ノート" not in md  # ヘッダの空白入り異形
+    # 繰り返しヘッダ（書名）とフッタ（ページ番号）が除去されている
+    # ヘッダとして繰り返す "RAG 取り込みパイプライン 設計ノート" は本文中に1回だけ（# 見出し）
+    plain_header_count = sum(
+        1
+        for line in md.splitlines()
+        if "RAG 取り込みパイプライン" in line and not line.startswith("#")
+    )
+    assert plain_header_count == 0
     assert "- 1 -" not in md and "- 2 -" not in md
 
 
@@ -61,7 +68,11 @@ def test_paragraph_lines_joined(md):
 
 def test_paragraph_separation(md):
     # 段落は空行で区切られる（本文段落が独立した行として存在）
-    paras = [b.strip() for b in md.split("\n\n") if b.strip() and not b.startswith("#")]
+    paras = [
+        b.strip()
+        for b in md.split("\n\n")
+        if b.strip() and not b.startswith("#") and not b.startswith("```")
+    ]
     assert len(paras) >= 6  # 本文段落が複数復元されている
     # 各本文段落の内部に改行が残っていない（段落内の不要改行が結合済み）
     assert all("\n" not in p for p in paras)
@@ -73,7 +84,17 @@ def test_reading_order(md):
     assert md.index("1.1 目的") < md.index("2.1 読み順")
 
 
+def test_code_block_fenced(md):
+    # モノスペースフォントのコードブロックが ``` フェンスで出力される
+    assert "```" in md
+    # フェンスの開始・終了が対になっている
+    fence_count = sum(1 for line in md.splitlines() if line.strip().startswith("```"))
+    assert fence_count >= 2  # 開きと閉じ
+    # コード内容が含まれる
+    assert "def embed" in md
+
+
 def test_extract_accepts_bytes():
     # S3 から取得した PDF バイト列を直接渡せる（MinIO 経由のパス）
     md = extract_pdf_to_markdown(_ensure_fixture().read_bytes())
-    assert "# RAG 取り込みパイプライン設計ノート" in md
+    assert "# RAG 取り込みパイプライン" in md

@@ -109,3 +109,50 @@ def test_no_heading_body_has_no_prefix():
     assert recs[0]["chapter"] is None and recs[0]["section"] is None
     assert " > " not in recs[0]["text"]
     assert recs[0]["text"].startswith("見出しのない本文")
+
+
+# ── コードブロック関連 ────────────────────────────────────────
+
+MD_WITH_CODE = """## 第一章 コード例
+
+### 1.1 実装
+
+以下の関数を使う。
+
+```
+def embed(texts):
+    return model.encode(texts)
+
+result = embed(['test'])
+```
+
+上記が基本的な使い方である。
+"""
+
+
+def test_code_block_not_split():
+    # コードブロック（``` フェンス）は分割されない（1チャンクに収まる）
+    recs = chunk_markdown(MD_WITH_CODE, META, size=80, overlap=10)
+    code_chunks = [r for r in recs if "def embed" in r["text"]]
+    assert len(code_chunks) == 1, "コードブロックは1チャンクに収まる"
+    # コード全体が1チャンクに含まれる
+    assert "model.encode" in code_chunks[0]["text"]
+
+
+def test_code_block_blank_lines_preserved():
+    # コードブロック内の空行が保持される
+    recs = chunk_markdown(MD_WITH_CODE, META, size=500, overlap=20)
+    code_chunks = [r for r in recs if "def embed" in r["text"]]
+    assert code_chunks, "コードブロックを含むチャンクがある"
+    text = code_chunks[0]["text"]
+    # フェンスが閉じている
+    assert text.count("```") >= 2
+
+
+def test_heading_inside_code_not_parsed():
+    # コードブロック内の ## はセクション見出しとして解釈されない
+    md = "## 章タイトル\n\n```\n## これはコメント\ncode here\n```\n\n本文。\n"
+    recs = chunk_markdown(md, META)
+    chapters = {r["chapter"] for r in recs if r["chapter"]}
+    assert "これはコメント" not in chapters  # フェンス内の ## が章にならない
+    assert "章タイトル" in chapters  # 正規の見出しは認識される

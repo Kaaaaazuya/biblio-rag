@@ -6,6 +6,7 @@
   - 段落内の改行（PyMuPDF が複数行ブロックとして返す → 改行結合を検証）
   - 段落間の空行
   - 全ページ共通のヘッダ(書名)とフッタ(ページ番号) → ヘッダ/フッタ除去を検証
+  - モノスペースフォントのコードブロック → コードブロック検出を検証
   - 複数ページ
 
 本文は著作権フリーのオリジナル文章（このリポジトリの作者が記述）。
@@ -25,6 +26,7 @@ from reportlab.platypus import (
     Frame,
     PageTemplate,
     Paragraph,
+    Preformatted,
     Spacer,
 )
 
@@ -42,7 +44,18 @@ STYLES = {
         "h2", fontName=FONT, fontSize=14, leading=20, spaceBefore=10, spaceAfter=6
     ),
     "body": ParagraphStyle("body", fontName=FONT, fontSize=10.5, leading=18, spaceAfter=10),
+    "code": ParagraphStyle(
+        "code",
+        fontName="Courier",  # モノスペースフォント = コードブロック検出のトリガー
+        fontSize=9,
+        leading=14,
+        spaceAfter=10,
+        leftIndent=12,
+    ),
 }
+
+# コードブロックのサンプル（行末を LF で表現、Preformatted に渡す）
+CODE_SAMPLE = "def embed(texts):\n    return model.encode(texts)\n\nresult = embed(['test'])"
 
 # (スタイル名, テキスト) の並び。本文は意図的に長くして行折り返し＆複数ページにする。
 CONTENT = [
@@ -90,6 +103,18 @@ CONTENT = [
         "ページ番号や繰り返し現れる書名などのヘッダ・フッタは、位置とパターンに"
         "基づいて取り除く。こうして得た整形済みテキストを正本として保存する。",
     ),
+    ("h2", "2.3 コードブロックの扱い"),
+    (
+        "body",
+        "技術書には実装例としてコードが掲載される。コードはモノスペースフォントで"
+        "組まれるため、フォントフラグによって本文と区別できる。以下に例を示す。",
+    ),
+    ("code", CODE_SAMPLE),
+    (
+        "body",
+        "上記の関数はテキストのリストを受け取り、埋め込みベクトルを返す。"
+        "コードブロックは分割せずに1チャンクとして扱う。",
+    ),
 ]
 
 
@@ -118,7 +143,10 @@ def build() -> Path:
 
     story = []
     for style, text in CONTENT:
-        story.append(Paragraph(text, STYLES[style]))
+        if style == "code":
+            story.append(Preformatted(text, STYLES[style]))
+        else:
+            story.append(Paragraph(text, STYLES[style]))
         if style == "title":
             story.append(Spacer(1, 12 * mm))
     doc.build(story)

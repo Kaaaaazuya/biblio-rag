@@ -32,10 +32,11 @@ DEFAULT_OVERLAP = 120
 
 _HEADING_RE = re.compile(r"^(#{1,6})\s+(.*)$")
 _PAGE_RE = re.compile(r"^<!-- page:(\d+) -->$")
+_FENCE_RE = re.compile(r"^(`{3,}|~{3,})")
 
 
-def _split_text(text: str, size: int, overlap: int) -> list[str]:
-    """文字数 + 句点優先 + overlap でテキストを分割する。"""
+def _split_prose(text: str, size: int, overlap: int) -> list[str]:
+    """文字数 + 句点優先 + overlap でテキストを分割する（コード外の散文用）。"""
     text = text.strip()
     if not text:
         return []
@@ -44,12 +45,10 @@ def _split_text(text: str, size: int, overlap: int) -> list[str]:
     while start < n:
         end = min(start + size, n)
         if end < n:
-            # まず end 以前の最後の「。」で切る（極小チャンクは避ける）
             dot = text.rfind("。", start, end)
             if dot != -1 and (dot + 1 - start) >= size * 0.5:
                 end = dot + 1
             else:
-                # 近傍後方に「。」があれば少しだけ延ばして文を切らない
                 fwd = text.find("。", end)
                 if fwd != -1 and (fwd + 1 - start) <= size * 1.5:
                     end = fwd + 1
@@ -58,8 +57,57 @@ def _split_text(text: str, size: int, overlap: int) -> list[str]:
             chunks.append(chunk)
         if end >= n:
             break
-        start = max(end - overlap, start + 1)  # 必ず前進させる
+        start = max(end - overlap, start + 1)
     return chunks
+
+
+def _split_text(text: str, size: int, overlap: int) -> list[str]:
+    """文字数 + 句点優先 + コードフェンス保護で分割する。
+
+    フェンス（``` or ~~~）で囲まれたコードブロックは原子単位として扱い、
+    サイズを超えても分割しない。散文部分のみ _split_prose を適用する。
+    """
+    text = text.strip()
+    if not text:
+        return []
+
+    # テキストをコードブロックと散文に分割
+    # コードブロックは ``` から ``` までを1まとまりとして保持
+    result: list[str] = []
+    prose_buf = ""
+
+    lines = text.splitlines(keepends=True)
+    in_fence = False
+    fence_buf = ""
+
+    for line in lines:
+        stripped = line.rstrip("\n")
+        if _FENCE_RE.match(stripped):
+            if not in_fence:
+                # フェンス開始: 直前の散文をフラッシュ
+                if prose_buf.strip():
+                    result.extend(_split_prose(prose_buf, size, overlap))
+                    prose_buf = ""
+                in_fence = True
+                fence_buf = line
+            else:
+                # フェンス終了: コードブロックをそのまま追加
+                fence_buf += line
+                result.append(fence_buf.rstrip())
+                fence_buf = ""
+                in_fence = False
+        elif in_fence:
+            fence_buf += line
+        else:
+            prose_buf += line
+
+    # 未クローズフェンス（不完全なコードブロック）はそのまま追加
+    if fence_buf.strip():
+        result.append(fence_buf.rstrip())
+    if prose_buf.strip():
+        result.extend(_split_prose(prose_buf, size, overlap))
+
+    return result
 
 
 def _parse_sections(md: str) -> list[tuple[list[str], str, int | None]]:
@@ -82,14 +130,31 @@ def _parse_sections(md: str) -> list[tuple[list[str], str, int | None]]:
                 sections.append((path, text, section_page))
             body.clear()
 
+    in_fence = False
     for raw in md.splitlines():
         line = raw.strip()
+
+        # コードフェンス状態の追跡（フェンス内は見出し判定・空行スキップをしない）
+        if _FENCE_RE.match(line):
+            in_fence = not in_fence
+            if not body:
+                section_page = cur_page
+            body.append(raw)
+            continue
+
+        if in_fence:
+            # フェンス内: 空行を保持し、見出しとして解釈しない
+            body.append(raw)
+            continue
+
         if not line:
             continue
+
         m_page = _PAGE_RE.match(line)
         if m_page:
             cur_page = int(m_page.group(1))
             continue
+
         m = _HEADING_RE.match(line)
         if m:
             flush()
@@ -100,7 +165,7 @@ def _parse_sections(md: str) -> list[tuple[list[str], str, int | None]]:
             section_page = cur_page
         else:
             if not body:
-                section_page = cur_page  # 本文段落の先頭でページを確定
+                section_page = cur_page
             body.append(line)
     flush()
     return sections
