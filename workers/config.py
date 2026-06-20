@@ -19,6 +19,14 @@ CHAT_MODEL = os.getenv("CHAT_MODEL", "qwen2.5:7b")
 EMBED_BACKEND = os.getenv("EMBED_BACKEND", "ollama")
 BEDROCK_EMBED_MODEL = os.getenv("BEDROCK_EMBED_MODEL", "amazon.titan-embed-text-v2:0")
 
+# RAG 改善フラグ（デフォルトはすべて無効）
+RERANK_ENABLED = os.getenv("RERANK_ENABLED", "false").lower() == "true"
+HYBRID_ENABLED = os.getenv("HYBRID_ENABLED", "false").lower() == "true"
+HYDE_ENABLED = os.getenv("HYDE_ENABLED", "false").lower() == "true"
+CITATION_ENABLED = os.getenv("CITATION_ENABLED", "false").lower() == "true"
+RERANK_CANDIDATE_K = int(os.getenv("RERANK_CANDIDATE_K", "20"))
+RERANK_MODEL = os.getenv("RERANK_MODEL", "BAAI/bge-reranker-v2-m3")
+
 # オブジェクトストレージ（開発: MinIO / 本番: AWS S3）
 # 本番は S3_ENDPOINT_URL を空にすると boto3 が AWS S3 を指す。
 S3_ENDPOINT_URL = os.getenv("S3_ENDPOINT_URL") or None
