@@ -19,6 +19,7 @@ dependencies = [
 dev = [
     "moto[s3,sqs]>=5.0",
     "pytest>=9.1.0",
+    "pytest-cov>=7.1.0",
     "pytest-playwright>=0.8.0",
     "reportlab>=4.5.1",
     "ruff>=0.15.17",
