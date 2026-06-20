@@ -95,7 +95,7 @@ def test_hybrid_rrf_combines_results():
     fake_store = MagicMock()
     fake_store.search_keyword.return_value = kw_chunks
 
-    result = server._hybrid_rrf("q", [0.0], vec_chunks, fake_store, top_k=3)
+    result = server._hybrid_rrf("q", vec_chunks, fake_store, top_k=3)
 
     ids = [(c["book_id"], c["chunk_index"]) for c in result]
     assert ids[0] == ("b", 0), "両方に出るチャンクが 1 位になる"
@@ -108,7 +108,7 @@ def test_hybrid_rrf_top_k_limits_result():
     fake_store = MagicMock()
     fake_store.search_keyword.return_value = kw_chunks
 
-    result = server._hybrid_rrf("q", [0.0], vec_chunks, fake_store, top_k=3)
+    result = server._hybrid_rrf("q", vec_chunks, fake_store, top_k=3)
     assert len(result) == 3
 
 
@@ -269,3 +269,152 @@ def test_citation_instruction_defined():
 def test_system_prompt_citation_placeholder():
     """_SYSTEM_PROMPT に {citation_instruction} プレースホルダーが含まれる。"""
     assert "{citation_instruction}" in server._SYSTEM_PROMPT
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SentenceReranker — クラスキャッシュでモデルを1回だけロード
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def test_sentence_reranker_model_loaded_once():
+    """同じモデル名で複数インスタンスを作っても CrossEncoder は1回だけ生成される。"""
+    from workers.rerank.sentence_reranker import SentenceReranker
+
+    load_count = 0
+
+    class _FakeCrossEncoder:
+        def __init__(self, name):
+            nonlocal load_count
+            load_count += 1
+
+        def predict(self, pairs):
+            return [0.9] * len(pairs)
+
+    model_name = "__test_model__"
+    SentenceReranker._cache.pop(model_name, None)  # テスト前にクリア
+
+    with patch("sentence_transformers.CrossEncoder", _FakeCrossEncoder):
+        r1 = SentenceReranker(model_name)
+        r1.rerank("q", [_make_chunk("b", 0)], 1)
+
+        r2 = SentenceReranker(model_name)
+        r2.rerank("q", [_make_chunk("b", 1)], 1)
+
+    assert load_count == 1, "CrossEncoder は1回だけ初期化されるべき"
+
+    SentenceReranker._cache.pop(model_name, None)  # クリーンアップ
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# search_keyword — LIKE パターンのワイルドカードエスケープ
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def test_search_keyword_escapes_percent(monkeypatch):
+    """query に '%' が含まれるとき LIKE パターンがエスケープされる。"""
+    from workers.embed.pgvector_store import PgVectorStore
+
+    executed_params: list = []
+
+    class _FakeCursor:
+        def __init__(self):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            pass
+
+        def execute(self, sql, params):
+            executed_params.append(params)
+
+        def fetchall(self):
+            return []
+
+    fake_conn = MagicMock()
+    fake_conn.cursor.return_value = _FakeCursor()
+
+    store = PgVectorStore.__new__(PgVectorStore)
+    store.conn = fake_conn
+
+    store.search_keyword("50%引き", top_k=5)
+
+    assert executed_params, "execute が呼ばれていない"
+    pat = executed_params[0]["pat"]
+    assert "\\%" in pat, f"% がエスケープされていない: {pat!r}"
+    assert pat == "%50\\%引き%", f"予期しないパターン: {pat!r}"
+
+
+def test_search_keyword_escapes_underscore(monkeypatch):
+    """query に '_' が含まれるとき LIKE パターンがエスケープされる。"""
+    from workers.embed.pgvector_store import PgVectorStore
+
+    executed_params: list = []
+
+    class _FakeCursor:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            pass
+
+        def execute(self, sql, params):
+            executed_params.append(params)
+
+        def fetchall(self):
+            return []
+
+    fake_conn = MagicMock()
+    fake_conn.cursor.return_value = _FakeCursor()
+
+    store = PgVectorStore.__new__(PgVectorStore)
+    store.conn = fake_conn
+
+    store.search_keyword("file_name", top_k=5)
+
+    pat = executed_params[0]["pat"]
+    assert "\\\\_" in pat or r"\_" in pat, f"_ がエスケープされていない: {pat!r}"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# _hyde — empty content フォールバック
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def test_hyde_fallback_on_empty_string():
+    """Ollama が content='' を返したとき元クエリにフォールバックする。"""
+    fake_resp = MagicMock()
+    fake_resp.json.return_value = {"message": {"content": ""}}
+
+    with patch("httpx.post", return_value=fake_resp):
+        result = server._hyde("original_query")
+
+    assert result == "original_query"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# _hybrid_rrf — pg_bigm 失敗時フォールバック
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def test_retrieve_hybrid_fallback_on_error(monkeypatch):
+    """search_keyword が例外を投げても vector-search 結果で続行する。"""
+    monkeypatch.setattr(config, "HYBRID_ENABLED", True)
+
+    fake_embedder = MagicMock()
+    fake_embedder.embed.return_value = [[0.1]]
+
+    vec_chunks = [_make_chunk("b", 0)]
+    fake_store = MagicMock()
+    fake_store.search.return_value = vec_chunks
+    fake_store.search_keyword.side_effect = RuntimeError("pg_bigm not installed")
+
+    with (
+        patch("workers.embed.ollama_embedder.OllamaEmbedder", return_value=fake_embedder),
+        patch("workers.embed.pgvector_store.PgVectorStore", return_value=fake_store),
+    ):
+        result = server._retrieve("query", top_k=5)
+
+    # 例外が伝播せず、ベクター結果が返る
+    assert result == vec_chunks

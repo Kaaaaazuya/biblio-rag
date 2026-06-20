@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import re
 import threading
@@ -107,7 +108,9 @@ def _retrieve(query: str, top_k: int) -> list[dict]:
     try:
         chunks = store.search(vec, top_k=candidate_k)
         if config.HYBRID_ENABLED:
-            chunks = _hybrid_rrf(query, vec, chunks, store, candidate_k)
+            with contextlib.suppress(Exception):
+                # pg_bigm 未インストール等で失敗した場合はベクター検索結果にフォールバック
+                chunks = _hybrid_rrf(query, chunks, store, candidate_k)
     finally:
         store.close()
 
@@ -121,9 +124,7 @@ def _retrieve(query: str, top_k: int) -> list[dict]:
 
 def _hyde(query: str) -> str:
     """クエリへの仮説回答を CHAT_MODEL で生成して返す（HyDE）。"""
-    import httpx as _httpx
-
-    resp = _httpx.post(
+    resp = httpx.post(
         f"{config.OLLAMA_HOST}/api/chat",
         json={
             "model": config.CHAT_MODEL,
@@ -135,12 +136,12 @@ def _hyde(query: str) -> str:
         timeout=30.0,
     )
     resp.raise_for_status()
-    return resp.json().get("message", {}).get("content", query)
+    content = resp.json().get("message", {}).get("content") or ""
+    return content if content else query
 
 
 def _hybrid_rrf(
     query: str,
-    vec: list[float],
     vec_chunks: list[dict],
     store,
     top_k: int,
@@ -213,7 +214,7 @@ async def chat(request: Request) -> StreamingResponse:
     if not query:
         return JSONResponse({"detail": "query は必須です"}, status_code=400)
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     chunks = await loop.run_in_executor(None, _retrieve, query, top_k)
 
     if config.CITATION_ENABLED:
