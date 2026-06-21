@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import re
 import threading
@@ -86,17 +87,86 @@ def _safe_name(name: str) -> str:
 
 
 def _retrieve(query: str, top_k: int) -> list[dict]:
-    """クエリを埋め込み、pgvector から類似チャンクを取得する（同期・スレッドで実行）。"""
+    """クエリを埋め込み、pgvector から類似チャンクを取得する（同期・スレッドで実行）。
+
+    HYDE_ENABLED   : 仮説回答を生成してからベクトル化する
+    HYBRID_ENABLED : pg_bigm キーワード検索と RRF 融合する
+    RERANK_ENABLED : CrossEncoder で再スコアリングして top_k に絞る
+    """
     from workers.embed.ollama_embedder import OllamaEmbedder
     from workers.embed.pgvector_store import PgVectorStore
 
+    search_query = query
+    if config.HYDE_ENABLED:
+        search_query = _hyde(query)
+
     embedder = OllamaEmbedder(config.OLLAMA_HOST, config.EMBED_MODEL, config.EMBED_DIM)
-    vec = embedder.embed([query])[0]
+    vec = embedder.embed([search_query])[0]
+
+    candidate_k = config.RERANK_CANDIDATE_K if config.RERANK_ENABLED else top_k
     store = PgVectorStore(config.database_url())
     try:
-        return store.search(vec, top_k=top_k)
+        chunks = store.search(vec, top_k=candidate_k)
+        if config.HYBRID_ENABLED:
+            with contextlib.suppress(Exception):
+                # pg_bigm 未インストール等で失敗した場合はベクター検索結果にフォールバック
+                chunks = _hybrid_rrf(query, chunks, store, candidate_k)
     finally:
         store.close()
+
+    if config.RERANK_ENABLED and chunks:
+        with contextlib.suppress(Exception):
+            from workers.rerank import SentenceReranker
+
+            chunks = SentenceReranker(config.RERANK_MODEL).rerank(query, chunks, top_k)
+
+    return chunks
+
+
+def _hyde(query: str) -> str:
+    """クエリへの仮説回答を CHAT_MODEL で生成して返す（HyDE）。"""
+    resp = httpx.post(
+        f"{config.OLLAMA_HOST}/api/chat",
+        json={
+            "model": config.CHAT_MODEL,
+            "messages": [
+                {"role": "user", "content": f"次の質問に対して簡潔に答えてください: {query}"}
+            ],
+            "stream": False,
+        },
+        timeout=30.0,
+    )
+    resp.raise_for_status()
+    content = resp.json().get("message", {}).get("content") or ""
+    return content if content else query
+
+
+def _hybrid_rrf(
+    query: str,
+    vec_chunks: list[dict],
+    store,
+    top_k: int,
+    k: int = 60,
+) -> list[dict]:
+    """ベクトル検索結果とキーワード検索結果を RRF で融合する（HYBRID_ENABLED 時）。"""
+    kw_chunks = store.search_keyword(query, top_k=top_k)
+
+    scores: dict[str, float] = {}
+    id_to_chunk: dict[str, dict] = {}
+
+    for rank, c in enumerate(vec_chunks):
+        cid = f"{c['book_id']}:{c['chunk_index']}"
+        scores[cid] = scores.get(cid, 0.0) + 1.0 / (k + rank + 1)
+        id_to_chunk[cid] = c
+
+    for rank, c in enumerate(kw_chunks):
+        cid = f"{c['book_id']}:{c['chunk_index']}"
+        scores[cid] = scores.get(cid, 0.0) + 1.0 / (k + rank + 1)
+        id_to_chunk[cid] = c
+
+    return [
+        id_to_chunk[cid] for cid in sorted(scores, key=scores.__getitem__, reverse=True)[:top_k]
+    ]
 
 
 _PERSONA_PREFIXES: dict[str, str] = {
@@ -123,9 +193,14 @@ _SYSTEM_PROMPT = """\
 Use only the reference text below as the basis for your answer.
 If the answer is not found in the reference text, say so clearly.
 {lang}
-
+{citation_instruction}
 Reference text:
 {context}"""
+
+_CITATION_INSTRUCTION = (
+    "各参考文章には番号が付いています。"
+    "回答中で情報を使ったときは [1] [2] の形で引用番号を示してください。\n"
+)
 
 
 async def chat(request: Request) -> StreamingResponse:
@@ -140,12 +215,18 @@ async def chat(request: Request) -> StreamingResponse:
     if not query:
         return JSONResponse({"detail": "query は必須です"}, status_code=400)
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     chunks = await loop.run_in_executor(None, _retrieve, query, top_k)
 
-    context = "\n\n".join(
-        f"【{c.get('title', '')}｜{c.get('chapter', '')}】\n{c['text']}" for c in chunks
-    )
+    if config.CITATION_ENABLED:
+        context = "\n\n".join(
+            f"[{i}] 【{c.get('title', '')}｜{c.get('chapter', '')}】\n{c['text']}"
+            for i, c in enumerate(chunks, 1)
+        )
+    else:
+        context = "\n\n".join(
+            f"【{c.get('title', '')}｜{c.get('chapter', '')}】\n{c['text']}" for c in chunks
+        )
     sources = [
         {k: c.get(k) for k in ("title", "author", "chapter", "section", "page", "text")}
         for c in chunks
@@ -153,6 +234,7 @@ async def chat(request: Request) -> StreamingResponse:
     system_content = _SYSTEM_PROMPT.format(
         persona=_PERSONA_PREFIXES.get(persona, ""),
         lang=_LANG_INSTRUCTIONS.get(lang, _LANG_INSTRUCTIONS["ja"]),
+        citation_instruction=_CITATION_INSTRUCTION if config.CITATION_ENABLED else "",
         context=context,
     )
     messages = [

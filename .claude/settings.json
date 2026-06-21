@@ -22,23 +22,39 @@
       "Bash(docker logs*)",
       "Bash(docker images*)",
       "Bash(ls*)",
+      "Bash(find*)",
       "Bash(cat*)",
       "Bash(head*)",
       "Bash(tail*)",
+      "Bash(wc*)",
+      "Bash(sort*)",
       "Bash(jq*)",
       "Bash(lsof*)",
       "Bash(which*)",
       "Bash(echo*)",
       "Bash(grep*)",
       "Bash(tr *)",
+      "Bash(python3 *)",
       "Bash(gitleaks *)",
-      "Bash(curl http://localhost:*)"
+      "Bash(curl http://localhost:*)",
+      "Bash(gh pr view*)",
+      "Bash(gh pr list*)",
+      "Bash(gh pr checks*)",
+      "Bash(gh issue view*)",
+      "Bash(gh issue list*)",
+      "Bash(gh run view*)",
+      "Bash(gh run list*)"
     ],
     "ask": [
       "Bash(git push*)",
       "Bash(git pull*)",
       "Bash(git fetch*)",
-      "Bash(git remote *)"
+      "Bash(git remote *)",
+      "Bash(gh pr create*)",
+      "Bash(gh pr merge*)",
+      "Bash(gh pr close*)",
+      "Bash(gh issue create*)",
+      "Bash(gh repo *)"
     ]
   },
   "hooks": {

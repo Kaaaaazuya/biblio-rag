@@ -62,6 +62,22 @@ class VectorStore(ABC):
 - pre-commit フック（gitleaks 等）を必ず通す。**`--no-verify` で迂回しない。**
 - コミット末尾に `Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>` を付ける。
 
+## 実装ループ（TDD → review → commit）
+
+新しいコードを書くときは必ずこの順番を守る：
+
+1. **Red** — 失敗するテストを先に書く（`uv run pytest tests/test_xxx.py -v` で失敗確認）
+2. **Green** — テストをパスする最小実装を書く（`uv run pytest` 全通過を確認）
+3. **Review** — `/code-review` で差分をレビュー（correctness 指摘のみ対応）
+4. **Commit** — `/commit` で Conventional Commits 準拠のコミット
+
+> **禁止**: 実装を書いてからテストを追加する順番。テストなしでコミットする。
+
+フルサイクルを `/tdd-cycle` スキルで自動化できる。
+
 ## テスト
 
+- `uv run pytest` / カバレッジ: `uv run pytest --cov=workers --cov=webui --cov-report=term-missing`
 - テスト用 PDF は著作権フリー（青空文庫等）を `tests/fixtures/` に置く。実書籍は使わない。
+- 外部サービス（DB・Ollama・S3）は必ずモックする。外部依存なしで全テストが通ること。
+- フラグ ON/OFF の両方のコードパスをテストする（`monkeypatch.setattr(config, "FLAG", True)`）。

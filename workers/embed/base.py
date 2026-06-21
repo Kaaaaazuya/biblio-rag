@@ -27,3 +27,9 @@ class VectorStore(ABC):
     def search(self, query_vector: list[float], top_k: int) -> list[dict]:
         """クエリベクトルに近いチャンクを上位 top_k 件返す。"""
         ...
+
+    def search_keyword(self, query: str, top_k: int) -> list[dict]:
+        """キーワード全文検索で上位 top_k 件返す（HYBRID_ENABLED 時に使用）。
+        デフォルトは空リストを返す。pg_bigm 対応実装でオーバーライドする。
+        """
+        return []
