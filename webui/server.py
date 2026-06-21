@@ -115,9 +115,10 @@ def _retrieve(query: str, top_k: int) -> list[dict]:
         store.close()
 
     if config.RERANK_ENABLED and chunks:
-        from workers.rerank import SentenceReranker
+        with contextlib.suppress(Exception):
+            from workers.rerank import SentenceReranker
 
-        chunks = SentenceReranker(config.RERANK_MODEL).rerank(query, chunks, top_k)
+            chunks = SentenceReranker(config.RERANK_MODEL).rerank(query, chunks, top_k)
 
     return chunks
 

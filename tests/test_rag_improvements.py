@@ -418,3 +418,29 @@ def test_retrieve_hybrid_fallback_on_error(monkeypatch):
 
     # 例外が伝播せず、ベクター結果が返る
     assert result == vec_chunks
+
+
+def test_retrieve_rerank_fallback_on_error(monkeypatch):
+    """SentenceReranker.rerank が例外を投げても vector-search 結果で続行する。"""
+    monkeypatch.setattr(config, "RERANK_ENABLED", True)
+    monkeypatch.setattr(config, "RERANK_CANDIDATE_K", 5)
+
+    fake_embedder = MagicMock()
+    fake_embedder.embed.return_value = [[0.1]]
+
+    vec_chunks = [_make_chunk("b", 0)]
+    fake_store = MagicMock()
+    fake_store.search.return_value = vec_chunks
+
+    fake_reranker = MagicMock()
+    fake_reranker.rerank.side_effect = RuntimeError("OOM")
+
+    with (
+        patch("workers.embed.ollama_embedder.OllamaEmbedder", return_value=fake_embedder),
+        patch("workers.embed.pgvector_store.PgVectorStore", return_value=fake_store),
+        patch("workers.rerank.SentenceReranker", return_value=fake_reranker),
+    ):
+        result = server._retrieve("query", top_k=3)
+
+    # 例外が伝播せず、Rerank 前のベクター結果が返る
+    assert result == vec_chunks
