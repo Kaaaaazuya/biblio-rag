@@ -18,7 +18,9 @@
 **スコープ内**: PDF（テキスト埋め込み済み）からの抽出 / 章・節構造の復元とチャンク分割 /
 埋め込みとベクトル DB 格納 / SQS による非同期連携 / 開発（ローカル）・本番（AWS）二段構え。
 
-**スコープ外**: スキャン PDF の OCR / DRM 付き書籍 / ハイブリッド検索・reranker。
+**スコープ外**: スキャン PDF の OCR / DRM 付き書籍。
+
+**機能フラグで追加（デフォルト OFF）**: Rerank（CrossEncoder）/ HyDE / Hybrid Retrieval（pg_bigm + RRF）/ Grounded Citation — 詳細は [ADR 0013](adr/0013-rag-improvements.md)。
 
 **スコープ内（追加）**: 取り込み済み書籍への最小 RAG チャット UI（`/chat.html`）— 検索→Ollama 生成の縦串を WebUI で操作可能にした最小実装（→ [ADR 0012](adr/0012-chat-webui.md)）。
 
@@ -160,8 +162,8 @@ class VectorStore(ABC):
 ## 12. 未決事項 / Open Questions
 
 - ~~回答生成パイプライン（検索→コンテキスト付与→回答）~~ → 最小 RAG チャット UI（`/chat.html`）を実装済み（→ [ADR 0012](adr/0012-chat-webui.md)）。本番 Bedrock 接続・エラーハンドリング詳細化は引き続き検討。
-- ハイブリッド検索（pgvector + 日本語全文検索 pg_bigm 等）の要否。
-- Reranker 導入の要否（検索精度チューニング時に判断）。
+- ~~ハイブリッド検索（pgvector + 日本語全文検索 pg_bigm 等）の要否。~~ → 実装済み（`HYBRID_ENABLED` フラグ、→ [ADR 0013](adr/0013-rag-improvements.md)）。pg_bigm の Docker 組み込みは未実装。
+- ~~Reranker 導入の要否（検索精度チューニング時に判断）。~~ → 実装済み（`RERANK_ENABLED` フラグ、`bge-reranker-v2-m3`、→ [ADR 0013](adr/0013-rag-improvements.md)）。
 - 書籍冊数のスケール見込み（Aurora サイズ・SQS スループット試算）。
 - 最大タスク数 N（同時処理冊数の上限）。
 - 処理状況のモニタリング（DLQ アラート・キュー深度ダッシュボード）。
