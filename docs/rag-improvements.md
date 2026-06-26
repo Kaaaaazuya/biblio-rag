@@ -119,9 +119,9 @@ workers/rerank/
 ## 4. 実装ロードマップ
 
 ```
-[Step 1] config.py にフラグ追加
+[Step 1] config.py にフラグ追加          ✅ 完了
   ↓
-[Step 2] Rerank — workers/rerank/ 新設、_retrieve 後段に追加
+[Step 2] Rerank — workers/rerank/ 新設、_retrieve 後段に追加  ✅ 完了
   ↓
 [Step 3] Grounded Citation — システムプロンプト改修
   ↓

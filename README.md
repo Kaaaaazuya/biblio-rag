@@ -159,6 +159,7 @@ PDF・書名・著者を入力 → `raw/<file>.pdf` が S3 に作られ、書誌
 - 回答の根拠チャンクを「ソース」チップで表示。クリックで原文モーダルを開く
 - 会話履歴を localStorage に保持（ページリロード後も復元）
 - Markdown レンダリング対応（marked.js）
+- **Rerank**（オプション）: `RERANK_ENABLED=true` でクロスエンコーダ再スコアリングを有効化。候補 `RERANK_CANDIDATE_K`（デフォルト 20）件から上位 top_k 件を絞り込む（`bge-reranker-v2-m3`）
 
 ```
 http://localhost:8000/chat.html
@@ -224,6 +225,7 @@ workers/
   extract/        # ① PyMuPDF 抽出
   chunk/          # ② チャンク（サイズ可変）
   embed/          # ③ 埋め込み + 格納（Embedder/VectorStore 抽象化）
+  rerank/         # ④ クロスエンコーダ再スコアリング（オプション）
 webui/
   server.py       # Starlette アプリ（アップロード API + RAG チャット SSE）
   static/
