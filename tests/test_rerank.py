@@ -29,7 +29,17 @@ def test_reranker_has_rerank_method():
 # ──────────────────────────────────────────────
 
 
-@patch("workers.rerank.sentence_reranker.CrossEncoder")
+@pytest.fixture(autouse=True)
+def clear_reranker_cache():
+    """各テスト前後に SentenceReranker のクラスキャッシュをクリアする。"""
+    from workers.rerank.sentence_reranker import SentenceReranker
+
+    SentenceReranker._cache.clear()
+    yield
+    SentenceReranker._cache.clear()
+
+
+@patch("sentence_transformers.CrossEncoder")
 def test_sentence_reranker_returns_top_k(mock_ce_cls):
     """上位 top_k 件に絞って返す。"""
     from workers.rerank.sentence_reranker import SentenceReranker
@@ -38,35 +48,33 @@ def test_sentence_reranker_returns_top_k(mock_ce_cls):
     mock_model.predict.return_value = [0.9, 0.3, 0.7, 0.1, 0.5]
     mock_ce_cls.return_value = mock_model
 
-    candidates = [{"text": f"chunk {i}", "score": 0.5} for i in range(5)]
+    candidates = [{"text": f"chunk {i}"} for i in range(5)]
     reranker = SentenceReranker("test-reranker-model")
     results = reranker.rerank("クエリ", candidates, top_k=3)
 
     assert len(results) == 3
-    # スコア降順になっているか
-    scores = [r["rerank_score"] for r in results]
-    assert scores == sorted(scores, reverse=True)
+    # 最高スコア 0.9 の chunk 0 が先頭
+    assert results[0]["text"] == "chunk 0"
 
 
-@patch("workers.rerank.sentence_reranker.CrossEncoder")
-def test_sentence_reranker_attaches_rerank_score(mock_ce_cls):
-    """結果に rerank_score が付与される。"""
+@patch("sentence_transformers.CrossEncoder")
+def test_sentence_reranker_returns_original_chunks(mock_ce_cls):
+    """結果は元の chunk dict をそのまま返す（rerank_score 付与なし）。"""
     from workers.rerank.sentence_reranker import SentenceReranker
 
     mock_model = MagicMock()
     mock_model.predict.return_value = [0.8, 0.2]
     mock_ce_cls.return_value = mock_model
 
-    candidates = [{"text": "a", "score": 0.5}, {"text": "b", "score": 0.4}]
+    candidates = [{"text": "a", "extra": 1}, {"text": "b", "extra": 2}]
     reranker = SentenceReranker("test-reranker-model")
     results = reranker.rerank("q", candidates, top_k=2)
 
-    assert all("rerank_score" in r for r in results)
-    assert results[0]["rerank_score"] == pytest.approx(0.8)
-    assert results[1]["rerank_score"] == pytest.approx(0.2)
+    assert results[0] == {"text": "a", "extra": 1}
+    assert results[1] == {"text": "b", "extra": 2}
 
 
-@patch("workers.rerank.sentence_reranker.CrossEncoder")
+@patch("sentence_transformers.CrossEncoder")
 def test_sentence_reranker_empty_candidates(mock_ce_cls):
     """候補が空のとき空リストを返す（エラーなし）。"""
     from workers.rerank.sentence_reranker import SentenceReranker
@@ -81,7 +89,7 @@ def test_sentence_reranker_empty_candidates(mock_ce_cls):
     assert results == []
 
 
-@patch("workers.rerank.sentence_reranker.CrossEncoder")
+@patch("sentence_transformers.CrossEncoder")
 def test_sentence_reranker_top_k_gt_candidates(mock_ce_cls):
     """top_k が候補数より多くても候補数だけ返す。"""
     from workers.rerank.sentence_reranker import SentenceReranker
@@ -90,7 +98,7 @@ def test_sentence_reranker_top_k_gt_candidates(mock_ce_cls):
     mock_model.predict.return_value = [0.6, 0.9]
     mock_ce_cls.return_value = mock_model
 
-    candidates = [{"text": "a", "score": 0.5}, {"text": "b", "score": 0.4}]
+    candidates = [{"text": "a"}, {"text": "b"}]
     reranker = SentenceReranker("test-reranker-model")
     results = reranker.rerank("q", candidates, top_k=10)
 
@@ -137,7 +145,7 @@ def test_config_rerank_flags_enabled(monkeypatch):
 # ──────────────────────────────────────────────
 
 
-@patch("workers.rerank.sentence_reranker.CrossEncoder")
+@patch("sentence_transformers.CrossEncoder")
 def test_retrieve_applies_rerank_when_enabled(mock_ce_cls, monkeypatch):
     """RERANK_ENABLED=True のとき _retrieve が reranker を呼ぶ。"""
     monkeypatch.setenv("RERANK_ENABLED", "true")
@@ -167,7 +175,6 @@ def test_retrieve_applies_rerank_when_enabled(mock_ce_cls, monkeypatch):
         patch("workers.embed.ollama_embedder.OllamaEmbedder", return_value=mock_embedder),
         patch("workers.embed.pgvector_store.PgVectorStore", return_value=mock_store),
         patch("webui.server.config", cfg),
-        patch("webui.server._reranker", None),  # シングルトンをリセット
     ):
         import webui.server as server
 
@@ -204,3 +211,63 @@ def test_retrieve_skips_rerank_when_disabled(monkeypatch):
         result = server._retrieve("クエリ", top_k=5)
 
     assert result == fake_chunks
+
+
+@patch("sentence_transformers.CrossEncoder")
+def test_retrieve_skips_rerank_when_candidates_empty(mock_ce_cls, monkeypatch):
+    """候補が空のとき reranker を呼ばない（不要なモデルロードを防止）。"""
+    monkeypatch.setenv("RERANK_ENABLED", "true")
+
+    import importlib
+
+    import workers.config as cfg
+
+    importlib.reload(cfg)
+
+    mock_embedder = MagicMock()
+    mock_embedder.embed.return_value = [[0.1] * 1024]
+
+    mock_store = MagicMock()
+    mock_store.search.return_value = []
+
+    with (
+        patch("workers.embed.ollama_embedder.OllamaEmbedder", return_value=mock_embedder),
+        patch("workers.embed.pgvector_store.PgVectorStore", return_value=mock_store),
+        patch("webui.server.config", cfg),
+    ):
+        import webui.server as server
+
+        result = server._retrieve("クエリ", top_k=5)
+
+    assert result == []
+    mock_ce_cls.assert_not_called()
+
+
+def test_retrieve_candidate_k_uses_max_of_rerank_k_and_top_k(monkeypatch):
+    """RERANK_CANDIDATE_K < top_k のとき candidate_k は top_k になる。"""
+    monkeypatch.setenv("RERANK_ENABLED", "true")
+    monkeypatch.setenv("RERANK_CANDIDATE_K", "3")  # top_k=5 より小さい
+
+    import importlib
+
+    import workers.config as cfg
+
+    importlib.reload(cfg)
+
+    mock_embedder = MagicMock()
+    mock_embedder.embed.return_value = [[0.1] * 1024]
+
+    mock_store = MagicMock()
+    mock_store.search.return_value = []
+
+    with (
+        patch("workers.embed.ollama_embedder.OllamaEmbedder", return_value=mock_embedder),
+        patch("workers.embed.pgvector_store.PgVectorStore", return_value=mock_store),
+        patch("webui.server.config", cfg),
+    ):
+        import webui.server as server
+
+        server._retrieve("クエリ", top_k=5)
+
+    # top_k=5 が優先されるので search は 5 件を要求するはず
+    mock_store.search.assert_called_once_with(mock_embedder.embed.return_value[0], top_k=5)

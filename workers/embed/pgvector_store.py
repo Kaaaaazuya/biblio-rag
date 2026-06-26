@@ -64,5 +64,22 @@ class PgVectorStore(VectorStore):
             cur.execute("DELETE FROM chunks WHERE book_id = %s", (book_id,))
             return cur.rowcount
 
+    def search_keyword(self, query: str, top_k: int) -> list[dict]:
+        """pg_bigm 全文検索で query に関連するチャンクを返す（HYBRID_ENABLED 時）。"""
+        escaped = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        with self.conn.cursor(row_factory=dict_row) as cur:
+            cur.execute(
+                """
+                SELECT book_id, chunk_index, title, author, chapter, section, page, text,
+                       bigm_similarity(text, %(q)s) AS score
+                FROM chunks
+                WHERE text LIKE %(pat)s ESCAPE '\\'
+                ORDER BY score DESC
+                LIMIT %(k)s
+                """,
+                {"q": query, "pat": f"%{escaped}%", "k": top_k},
+            )
+            return cur.fetchall()
+
     def close(self) -> None:
         self.conn.close()

@@ -5,5 +5,5 @@ from abc import ABC, abstractmethod
 
 class Reranker(ABC):
     @abstractmethod
-    def rerank(self, query: str, candidates: list[dict], top_k: int) -> list[dict]:
-        """候補を再スコアリングして上位 top_k 件を返す。結果に rerank_score を付与する。"""
+    def rerank(self, query: str, chunks: list[dict], top_k: int) -> list[dict]:
+        """chunks を query との関連度で再スコアリングし、上位 top_k 件を返す。"""
