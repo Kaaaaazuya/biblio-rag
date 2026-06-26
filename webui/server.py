@@ -85,6 +85,22 @@ def _safe_name(name: str) -> str:
     return base
 
 
+_reranker = None
+_reranker_lock = threading.Lock()
+
+
+def _get_reranker():
+    """SentenceReranker のシングルトン。初回呼び出し時にモデルをロードする。"""
+    global _reranker
+    if _reranker is None:
+        with _reranker_lock:
+            if _reranker is None:
+                from workers.rerank.sentence_reranker import SentenceReranker
+
+                _reranker = SentenceReranker(config.RERANK_MODEL)
+    return _reranker
+
+
 def _retrieve(query: str, top_k: int) -> list[dict]:
     """クエリを埋め込み、pgvector から類似チャンクを取得する（同期・スレッドで実行）。"""
     from workers.embed.ollama_embedder import OllamaEmbedder
@@ -94,9 +110,15 @@ def _retrieve(query: str, top_k: int) -> list[dict]:
     vec = embedder.embed([query])[0]
     store = PgVectorStore(config.database_url())
     try:
-        return store.search(vec, top_k=top_k)
+        candidate_k = config.RERANK_CANDIDATE_K if config.RERANK_ENABLED else top_k
+        candidates = store.search(vec, top_k=candidate_k)
     finally:
         store.close()
+
+    if not config.RERANK_ENABLED:
+        return candidates
+
+    return _get_reranker().rerank(query, candidates, top_k=top_k)
 
 
 _PERSONA_PREFIXES: dict[str, str] = {
