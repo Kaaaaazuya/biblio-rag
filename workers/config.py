@@ -33,10 +33,6 @@ S3_ENDPOINT_URL = os.getenv("S3_ENDPOINT_URL") or None
 S3_BUCKET = os.getenv("S3_BUCKET", "biblio")
 AWS_REGION = os.getenv("AWS_REGION", "ap-northeast-1")
 
-RERANK_ENABLED = os.getenv("RERANK_ENABLED", "false").lower() == "true"
-RERANK_MODEL = os.getenv("RERANK_MODEL", "BAAI/bge-reranker-v2-m3")
-RERANK_CANDIDATE_K = int(os.getenv("RERANK_CANDIDATE_K", "20"))
-
 
 def s3_client():
     """boto3 S3 クライアント。資格情報は環境変数（.env）から自動解決。"""
