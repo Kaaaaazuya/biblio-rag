@@ -103,7 +103,7 @@ def _retrieve(query: str, top_k: int) -> list[dict]:
     embedder = OllamaEmbedder(config.OLLAMA_HOST, config.EMBED_MODEL, config.EMBED_DIM)
     vec = embedder.embed([search_query])[0]
 
-    candidate_k = config.RERANK_CANDIDATE_K if config.RERANK_ENABLED else top_k
+    candidate_k = max(config.RERANK_CANDIDATE_K, top_k) if config.RERANK_ENABLED else top_k
     store = PgVectorStore(config.database_url())
     try:
         chunks = store.search(vec, top_k=candidate_k)
