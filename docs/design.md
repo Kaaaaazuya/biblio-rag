@@ -116,6 +116,17 @@ class VectorStore(ABC):
 | Embedder | OllamaEmbedder | BedrockEmbedder |
 | VectorStore | PgVectorStore（Docker） | PgVectorStore（Aurora・同一実装） |
 
+### ④ 検索精度改善（オプション・フラグ制御）
+
+`_retrieve()` 内で環境変数フラグにより有効化できる。詳細は [ADR 0013](adr/0013-rag-precision-improvements.md)。
+
+| フラグ | 手法 | 効果 |
+|---|---|---|
+| `HYDE_ENABLED` | HyDE（仮説回答でクエリ書き換え） | クエリ語と回答語のギャップを埋める |
+| `HYBRID_ENABLED` | pg_bigm + RRF 融合 | 固有名詞・技術用語の取りこぼし補完 |
+| `RERANK_ENABLED` | クロスエンコーダ再スコアリング | 「意味は近いが答えでない」チャンクを後退させる |
+| `CITATION_ENABLED` | 回答内引用番号付与 | 根拠チャンクと回答文の対応を明示 |
+
 ### 既知の限界（MVP）
 
 - **多段組みの読み順**: ① は行を `(page, y0, x0)` で整列するため、2段組みは左右段が交互になりうる。
