@@ -108,7 +108,7 @@ uv run python -m workers.search "調べたいこと" --top-k 5
 取り込みが完了したら、以下のフラグを `.env` で有効にして精度を比較できる。
 
 ```bash
-# .env に追記して webui / search を再起動する
+# .env に追記して webui を再起動する（CLI の workers.search は未対応）
 RERANK_ENABLED=true         # クロスエンコーダで上位 20 件を再スコアリング → top_k に絞る
 HYDE_ENABLED=true           # クエリを仮説回答に変換してからベクトル化（レイテンシ +1〜2秒）
 HYBRID_ENABLED=true         # ベクトル検索 + pg_bigm キーワード検索を RRF で融合
