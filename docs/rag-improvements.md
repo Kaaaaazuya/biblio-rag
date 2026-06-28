@@ -123,11 +123,11 @@ workers/rerank/
   ↓
 [Step 2] Rerank — workers/rerank/ 新設、_retrieve 後段に追加  ✅ 完了
   ↓
-[Step 3] Grounded Citation — システムプロンプト改修
+[Step 3] Grounded Citation — システムプロンプト改修  ✅ 完了（main PR #3）
   ↓
-[Step 4] Hybrid Retrieval — Dockerfile + スキーマ + _retrieve 統合
+[Step 4] Hybrid Retrieval — Dockerfile + スキーマ + _retrieve 統合  ✅ 完了（main PR #3）
   ↓
-[Step 5] HyDE — _retrieve 前段に仮説生成追加
+[Step 5] HyDE — _retrieve 前段に仮説生成追加  ✅ 完了（main PR #3）
 ```
 
 ---
