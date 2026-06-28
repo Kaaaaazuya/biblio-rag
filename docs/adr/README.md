@@ -16,5 +16,7 @@
 | [0010](0010-e2e-testing-strategy.md) | E2E テスト戦略（パイプライン=pytest / WebUI=Playwright） | Accepted |
 | [0011](0011-aws-serverless-pipeline.md) | AWS サーバーレスパイプライン（2nd ステージ） | Accepted |
 | [0012](0012-chat-webui.md) | 最小 RAG チャット UI の追加（Ollama + SSE） | Accepted |
+| [0013](0013-rag-precision-improvements.md) | RAG 精度改善: Rerank / Hybrid / HyDE / Citation | Accepted |
+| [0014](0014-eval-search-metrics.md) | 検索精度の評価基盤: hit@k / MRR + fixture クエリセット | Accepted |
 
 0001〜0006 は既存 Design Doc の決定を ADR 化したもの。
