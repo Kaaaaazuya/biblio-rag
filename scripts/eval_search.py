@@ -59,6 +59,13 @@ def _first_relevant_rank(hits: list[dict], item: dict) -> int | None:
 
 def evaluate(queries: list[dict], embedder: OllamaEmbedder, store: PgVectorStore, top_k: int):
     """各クエリを評価して (結果リスト, 集計) を返す。"""
+    if config.RERANK_ENABLED:
+        from workers.rerank import SentenceReranker
+
+        reranker = SentenceReranker(config.RERANK_MODEL)
+    else:
+        reranker = None
+
     rows = []
     for item in queries:
         vec = embedder.embed([item["q"]])[0]
@@ -66,34 +73,40 @@ def evaluate(queries: list[dict], embedder: OllamaEmbedder, store: PgVectorStore
         if config.HYDE_ENABLED:
             import httpx
 
-            resp = httpx.post(
-                f"{config.OLLAMA_HOST}/api/chat",
-                json={
-                    "model": config.CHAT_MODEL,
-                    "messages": [
-                        {
-                            "role": "user",
-                            "content": f"次の質問に対して簡潔に答えてください: {item['q']}",
-                        }
-                    ],
-                    "stream": False,
-                },
-                timeout=30.0,
-            )
-            if resp.is_success:
-                hypo = resp.json().get("message", {}).get("content") or ""
-                if hypo:
-                    vec = embedder.embed([hypo])[0]
+            try:
+                resp = httpx.post(
+                    f"{config.OLLAMA_HOST}/api/chat",
+                    json={
+                        "model": config.CHAT_MODEL,
+                        "messages": [
+                            {
+                                "role": "user",
+                                "content": f"次の質問に対して簡潔に答えてください: {item['q']}",
+                            }
+                        ],
+                        "stream": False,
+                    },
+                    timeout=30.0,
+                )
+                if resp.is_success:
+                    hypo = resp.json().get("message", {}).get("content") or ""
+                    if hypo:
+                        vec = embedder.embed([hypo])[0]
+                else:
+                    print(
+                        f"警告: HyDE生成に失敗しました (HTTP {resp.status_code})",
+                        file=sys.stderr,
+                    )
+            except (httpx.HTTPError, ValueError) as e:
+                print(f"警告: HyDE生成中にエラーが発生しました: {e}", file=sys.stderr)
 
         candidate_k = max(config.RERANK_CANDIDATE_K, top_k) if config.RERANK_ENABLED else top_k
         # book_id 指定時は取りこぼし防止に多めに取る
         fetch_k = candidate_k * 3 if item.get("book_id") else candidate_k
         hits = store.search(vec, fetch_k)
 
-        if config.RERANK_ENABLED and hits:
-            from workers.rerank import SentenceReranker
-
-            hits = SentenceReranker(config.RERANK_MODEL).rerank(item["q"], hits, top_k)
+        if reranker and hits:
+            hits = reranker.rerank(item["q"], hits, top_k)
 
         rank = _first_relevant_rank(hits, item)
         hit = rank is not None and rank <= top_k
@@ -113,12 +126,10 @@ def _run_condition(label: str, flags: dict, queries: list[dict], top_k: int) -> 
             os.environ[k] = v
         import importlib
 
-        import workers.config as cfg
+        importlib.reload(config)
 
-        importlib.reload(cfg)
-
-        embedder = OllamaEmbedder(cfg.OLLAMA_HOST, cfg.EMBED_MODEL, cfg.EMBED_DIM)
-        store = PgVectorStore(cfg.database_url())
+        embedder = OllamaEmbedder(config.OLLAMA_HOST, config.EMBED_MODEL, config.EMBED_DIM)
+        store = PgVectorStore(config.database_url())
         try:
             rows, summary = evaluate(queries, embedder, store, top_k)
         finally:
@@ -132,9 +143,7 @@ def _run_condition(label: str, flags: dict, queries: list[dict], top_k: int) -> 
                 os.environ[k] = v
         import importlib
 
-        import workers.config as cfg
-
-        importlib.reload(cfg)
+        importlib.reload(config)
 
 
 _COMPARE_CONDITIONS = [

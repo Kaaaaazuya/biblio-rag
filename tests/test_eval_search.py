@@ -4,7 +4,15 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
+import pytest
+
 from scripts.eval_search import _first_relevant_rank, _relevant, evaluate
+
+
+@pytest.fixture(autouse=True)
+def disable_rag_extensions(monkeypatch):
+    monkeypatch.setattr("scripts.eval_search.config.HYDE_ENABLED", False)
+    monkeypatch.setattr("scripts.eval_search.config.RERANK_ENABLED", False)
 
 
 def _make_hit(text: str, book_id: str = "book1", chapter: str = "第一章") -> dict:
