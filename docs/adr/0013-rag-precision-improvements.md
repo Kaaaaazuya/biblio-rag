@@ -76,4 +76,8 @@ query
 - `RERANK_ENABLED` は `torch` + `sentence-transformers` 依存（約 2GB）が増える。初回モデルダウンロードが必要。
 - `HYDE_ENABLED` はレイテンシが 1〜2 秒増加する。
 - `HYBRID_ENABLED` は `pg_bigm` 拡張の Docker イメージカスタマイズが必要。
+- `HYBRID_ENABLED` 時のキーワード検索失敗は `contextlib.suppress` でサイレントに握りつぶし、
+  ベクトル検索結果にフォールバックする。`pg_bigm` が未インストールの場合も含めて警告ログは出ない。
+  「有効にしたはずなのに機能していない」ことに気づきにくいトレードオフがある。
+  改善策として `logger.warning` での通知追加を将来課題とする（現時点では可用性を優先）。
 - すべてのフラグがデフォルト off のため、既存ユーザへの影響はゼロ。

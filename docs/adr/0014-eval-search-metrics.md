@@ -67,3 +67,7 @@ uv run python scripts/eval_search.py tests/fixtures/eval_queries.json --compare
 - `--compare` の `importlib.reload` は副作用があるため本番コードでは使わない。評価スクリプト専用。
 - fixture クエリは著作権フリー素材ベースのため、実書籍とのドメイン差がある。
   実書籍向けには `books/eval_queries.json`（gitignore）を別途作成して計測する。
+- `book_id` 指定クエリの評価は DB 側でフィルタせず `fetch_k = candidate_k * 3` で多め取得して
+  メモリ上でフィルタリングする暫定実装。登録書籍数が増えると目的書籍のチャンクが埋もれ、
+  hit@k / MRR が不当に低下するリスクがある。
+  将来的には `VectorStore.search` に `book_id` フィルタオプションを追加して DB クエリ段階で絞り込む。
