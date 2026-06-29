@@ -444,3 +444,79 @@ def test_retrieve_rerank_fallback_on_error(monkeypatch):
 
     # 例外が伝播せず、Rerank 前のベクター結果が返る
     assert result == vec_chunks
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Issue #7: HYBRID_ENABLED フォールバック時に warning ログを出力する
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def test_retrieve_hybrid_fallback_logs_warning(monkeypatch, caplog):
+    """search_keyword が例外を投げたとき logger.warning が出力される。"""
+    import logging
+
+    monkeypatch.setattr(config, "HYBRID_ENABLED", True)
+
+    fake_embedder = MagicMock()
+    fake_embedder.embed.return_value = [[0.1]]
+
+    vec_chunks = [_make_chunk("b", 0)]
+    fake_store = MagicMock()
+    fake_store.search.return_value = vec_chunks
+    fake_store.search_keyword.side_effect = RuntimeError("pg_bigm not installed")
+
+    with (
+        patch("workers.embed.ollama_embedder.OllamaEmbedder", return_value=fake_embedder),
+        patch("workers.embed.pgvector_store.PgVectorStore", return_value=fake_store),
+        caplog.at_level(logging.WARNING, logger="webui.server"),
+    ):
+        result = server._retrieve("query", top_k=5)
+
+    assert result == vec_chunks
+    assert any("HYBRID" in r.message for r in caplog.records)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Issue #8: VectorStore.search に book_id フィルタオプションを追加
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def test_pgvector_search_with_book_id_filter():
+    """book_id 指定時に WHERE 句でフィルタされることを SQL で確認する。"""
+    from unittest.mock import MagicMock, patch
+
+    from workers.embed.pgvector_store import PgVectorStore
+
+    mock_conn = MagicMock()
+    mock_cur = MagicMock()
+    mock_conn.cursor.return_value.__enter__ = lambda s: mock_cur
+    mock_conn.cursor.return_value.__exit__ = MagicMock(return_value=False)
+    mock_cur.fetchall.return_value = []
+
+    with patch("workers.embed.pgvector_store.psycopg.connect", return_value=mock_conn):
+        store = PgVectorStore("dsn://fake")
+        store.search([0.1] * 1024, top_k=5, book_id="book1")
+
+    sql = mock_cur.execute.call_args[0][0]
+    assert "book_id" in sql
+
+
+def test_pgvector_search_without_book_id_filter():
+    """book_id 未指定時は WHERE book_id を含まない SQL が実行される。"""
+    from unittest.mock import MagicMock, patch
+
+    from workers.embed.pgvector_store import PgVectorStore
+
+    mock_conn = MagicMock()
+    mock_cur = MagicMock()
+    mock_conn.cursor.return_value.__enter__ = lambda s: mock_cur
+    mock_conn.cursor.return_value.__exit__ = MagicMock(return_value=False)
+    mock_cur.fetchall.return_value = []
+
+    with patch("workers.embed.pgvector_store.psycopg.connect", return_value=mock_conn):
+        store = PgVectorStore("dsn://fake")
+        store.search([0.1] * 1024, top_k=5)
+
+    sql = mock_cur.execute.call_args[0][0]
+    # book_id フィルタなし → WHERE 句に book_id を含まない
+    assert "WHERE book_id" not in sql

@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import logging
 import re
 import threading
 from pathlib import Path
@@ -30,6 +31,8 @@ from starlette.staticfiles import StaticFiles
 
 from workers import config
 from workers.storage import RAW_PREFIX
+
+logger = logging.getLogger(__name__)
 
 STATIC_DIR = Path(__file__).parent / "static"
 
@@ -108,9 +111,12 @@ def _retrieve(query: str, top_k: int) -> list[dict]:
     try:
         chunks = store.search(vec, top_k=candidate_k)
         if config.HYBRID_ENABLED:
-            with contextlib.suppress(Exception):
-                # pg_bigm 未インストール等で失敗した場合はベクター検索結果にフォールバック
+            try:
                 chunks = _hybrid_rrf(query, chunks, store, candidate_k)
+            except Exception as e:
+                logger.warning(
+                    "HYBRID_ENABLED=true だがキーワード検索失敗（VEC検索にフォールバック）: %s", e
+                )
     finally:
         store.close()
 

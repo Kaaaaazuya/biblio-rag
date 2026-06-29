@@ -24,8 +24,10 @@ class VectorStore(ABC):
         ...
 
     @abstractmethod
-    def search(self, query_vector: list[float], top_k: int) -> list[dict]:
-        """クエリベクトルに近いチャンクを上位 top_k 件返す。"""
+    def search(
+        self, query_vector: list[float], top_k: int, book_id: str | None = None
+    ) -> list[dict]:
+        """クエリベクトルに近いチャンクを上位 top_k 件返す。book_id 指定時は DB でフィルタする。"""
         ...
 
     def search_keyword(self, query: str, top_k: int) -> list[dict]:

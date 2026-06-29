@@ -33,6 +33,15 @@ ORDER BY embedding <=> %(qv)s::vector
 LIMIT %(k)s
 """
 
+_SEARCH_WITH_BOOK_ID = """
+SELECT book_id, chunk_index, title, author, chapter, section, page, text,
+       1 - (embedding <=> %(qv)s::vector) AS score
+FROM chunks
+WHERE book_id = %(book_id)s
+ORDER BY embedding <=> %(qv)s::vector
+LIMIT %(k)s
+"""
+
 
 def _vec_literal(vec: Sequence[float]) -> str:
     return "[" + ",".join(str(float(x)) for x in vec) + "]"
@@ -47,9 +56,17 @@ class PgVectorStore(VectorStore):
             for chunk, vec in zip(chunks, vectors, strict=True):
                 cur.execute(_UPSERT, {**chunk, "embedding": _vec_literal(vec)})
 
-    def search(self, query_vector: list[float], top_k: int) -> list[dict]:
+    def search(
+        self, query_vector: list[float], top_k: int, book_id: str | None = None
+    ) -> list[dict]:
         with self.conn.cursor(row_factory=dict_row) as cur:
-            cur.execute(_SEARCH, {"qv": _vec_literal(query_vector), "k": top_k})
+            if book_id is not None:
+                cur.execute(
+                    _SEARCH_WITH_BOOK_ID,
+                    {"qv": _vec_literal(query_vector), "k": top_k, "book_id": book_id},
+                )
+            else:
+                cur.execute(_SEARCH, {"qv": _vec_literal(query_vector), "k": top_k})
             return cur.fetchall()
 
     def count_book(self, book_id: str) -> int:
