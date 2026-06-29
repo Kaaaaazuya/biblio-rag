@@ -30,8 +30,9 @@ class VectorStore(ABC):
         """クエリベクトルに近いチャンクを上位 top_k 件返す。book_id 指定時は DB でフィルタする。"""
         ...
 
-    def search_keyword(self, query: str, top_k: int) -> list[dict]:
+    def search_keyword(self, query: str, top_k: int, book_id: str | None = None) -> list[dict]:
         """キーワード全文検索で上位 top_k 件返す（HYBRID_ENABLED 時に使用）。
+        book_id 指定時はその書籍のみに絞る。
         デフォルトは空リストを返す。pg_bigm 対応実装でオーバーライドする。
         """
         return []

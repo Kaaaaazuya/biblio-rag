@@ -153,9 +153,10 @@ def _hybrid_rrf(
     store,
     top_k: int,
     k: int = 60,
+    book_id: str | None = None,
 ) -> list[dict]:
     """ベクトル検索結果とキーワード検索結果を RRF で融合する（HYBRID_ENABLED 時）。"""
-    kw_chunks = store.search_keyword(query, top_k=top_k)
+    kw_chunks = store.search_keyword(query, top_k=top_k, book_id=book_id)
 
     scores: dict[str, float] = {}
     id_to_chunk: dict[str, dict] = {}

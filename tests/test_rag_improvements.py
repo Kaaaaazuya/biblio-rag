@@ -194,7 +194,7 @@ def test_retrieve_hybrid_enabled(monkeypatch):
     ):
         result = server._retrieve("query", top_k=5)
 
-    fake_store.search_keyword.assert_called_once_with("query", top_k=5)
+    fake_store.search_keyword.assert_called_once_with("query", top_k=5, book_id=None)
     assert isinstance(result, list)
 
 
@@ -489,8 +489,7 @@ def test_pgvector_search_with_book_id_filter():
 
     mock_conn = MagicMock()
     mock_cur = MagicMock()
-    mock_conn.cursor.return_value.__enter__ = lambda s: mock_cur
-    mock_conn.cursor.return_value.__exit__ = MagicMock(return_value=False)
+    mock_conn.cursor.return_value.__enter__.return_value = mock_cur
     mock_cur.fetchall.return_value = []
 
     with patch("workers.embed.pgvector_store.psycopg.connect", return_value=mock_conn):
@@ -509,8 +508,7 @@ def test_pgvector_search_without_book_id_filter():
 
     mock_conn = MagicMock()
     mock_cur = MagicMock()
-    mock_conn.cursor.return_value.__enter__ = lambda s: mock_cur
-    mock_conn.cursor.return_value.__exit__ = MagicMock(return_value=False)
+    mock_conn.cursor.return_value.__enter__.return_value = mock_cur
     mock_cur.fetchall.return_value = []
 
     with patch("workers.embed.pgvector_store.psycopg.connect", return_value=mock_conn):
