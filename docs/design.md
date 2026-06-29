@@ -18,7 +18,7 @@
 **スコープ内**: PDF（テキスト埋め込み済み）からの抽出 / 章・節構造の復元とチャンク分割 /
 埋め込みとベクトル DB 格納 / SQS による非同期連携 / 開発（ローカル）・本番（AWS）二段構え。
 
-**スコープ外**: スキャン PDF の OCR / DRM 付き書籍 / ハイブリッド検索・reranker。
+**スコープ外**: スキャン PDF の OCR / DRM 付き書籍。
 
 **スコープ内（追加）**: 取り込み済み書籍への最小 RAG チャット UI（`/chat.html`）— 検索→Ollama 生成の縦串を WebUI で操作可能にした最小実装（→ [ADR 0012](adr/0012-chat-webui.md)）。
 
@@ -116,6 +116,17 @@ class VectorStore(ABC):
 | Embedder | OllamaEmbedder | BedrockEmbedder |
 | VectorStore | PgVectorStore（Docker） | PgVectorStore（Aurora・同一実装） |
 
+### ④ 検索精度改善（オプション・フラグ制御）
+
+`_retrieve()` 内で環境変数フラグにより有効化できる。詳細は [ADR 0013](adr/0013-rag-precision-improvements.md)。
+
+| フラグ | 手法 | 効果 |
+|---|---|---|
+| `HYDE_ENABLED` | HyDE（仮説回答でクエリ書き換え） | クエリ語と回答語のギャップを埋める |
+| `HYBRID_ENABLED` | pg_bigm + RRF 融合 | 固有名詞・技術用語の取りこぼし補完 |
+| `RERANK_ENABLED` | クロスエンコーダ再スコアリング | 「意味は近いが答えでない」チャンクを後退させる |
+| `CITATION_ENABLED` | 回答内引用番号付与 | 根拠チャンクと回答文の対応を明示 |
+
 ### 既知の限界（MVP）
 
 - **多段組みの読み順**: ① は行を `(page, y0, x0)` で整列するため、2段組みは左右段が交互になりうる。
@@ -160,8 +171,8 @@ class VectorStore(ABC):
 ## 12. 未決事項 / Open Questions
 
 - ~~回答生成パイプライン（検索→コンテキスト付与→回答）~~ → 最小 RAG チャット UI（`/chat.html`）を実装済み（→ [ADR 0012](adr/0012-chat-webui.md)）。本番 Bedrock 接続・エラーハンドリング詳細化は引き続き検討。
-- ハイブリッド検索（pgvector + 日本語全文検索 pg_bigm 等）の要否。
-- Reranker 導入の要否（検索精度チューニング時に判断）。
+- ~~ハイブリッド検索（pgvector + 日本語全文検索 pg_bigm 等）の要否~~ → `HYBRID_ENABLED` フラグで実装済み（→ [ADR 0013](adr/0013-rag-precision-improvements.md)）。
+- ~~Reranker 導入の要否（検索精度チューニング時に判断）~~ → `RERANK_ENABLED` フラグで実装済み（→ [ADR 0013](adr/0013-rag-precision-improvements.md)）。
 - 書籍冊数のスケール見込み（Aurora サイズ・SQS スループット試算）。
 - 最大タスク数 N（同時処理冊数の上限）。
 - 処理状況のモニタリング（DLQ アラート・キュー深度ダッシュボード）。
