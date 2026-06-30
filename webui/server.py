@@ -116,7 +116,9 @@ def _retrieve(query: str, top_k: int, book_id: str | None = None) -> list[dict]:
                 chunks = _hybrid_rrf(query, chunks, store, candidate_k, book_id=book_id)
             except Exception as e:
                 logger.warning(
-                    "HYBRID_ENABLED=true だがキーワード検索失敗（VEC検索にフォールバック）: %s", e
+                    "HYBRID_ENABLED=true だがキーワード検索失敗（VEC検索にフォールバック）: %s",
+                    e,
+                    exc_info=True,
                 )
     finally:
         store.close()
