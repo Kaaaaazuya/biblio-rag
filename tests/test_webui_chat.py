@@ -99,7 +99,7 @@ def test_retrieve_calls_embedder_and_store():
         result = server._retrieve("my query", 3)
 
     fake_embedder.embed.assert_called_once_with(["my query"])
-    fake_store.search.assert_called_once_with(fake_vec, top_k=3)
+    fake_store.search.assert_called_once_with(fake_vec, top_k=3, book_id=None)
     fake_store.close.assert_called_once()
     assert result == fake_results
 

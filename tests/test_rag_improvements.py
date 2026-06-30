@@ -169,7 +169,7 @@ def test_retrieve_rerank_enabled(monkeypatch):
     ):
         result = server._retrieve("query", top_k=1)
 
-    fake_store.search.assert_called_once_with([0.1], top_k=20)
+    fake_store.search.assert_called_once_with([0.1], top_k=20, book_id=None)
     fake_reranker.rerank.assert_called_once_with("query", candidates, 1)
     assert result == reranked
 
@@ -518,3 +518,62 @@ def test_pgvector_search_without_book_id_filter():
     sql = mock_cur.execute.call_args[0][0]
     # book_id フィルタなし → WHERE 句に book_id を含まない
     assert "WHERE book_id" not in sql
+
+
+def test_pgvector_search_keyword_with_book_id_filter():
+    """search_keyword: book_id 指定時に WHERE book_id が SQL に含まれる。"""
+    from unittest.mock import MagicMock, patch
+
+    from workers.embed.pgvector_store import PgVectorStore
+
+    mock_conn = MagicMock()
+    mock_cur = MagicMock()
+    mock_conn.cursor.return_value.__enter__.return_value = mock_cur
+    mock_cur.fetchall.return_value = []
+
+    with patch("workers.embed.pgvector_store.psycopg.connect", return_value=mock_conn):
+        store = PgVectorStore("dsn://fake")
+        store.search_keyword("クエリ", top_k=5, book_id="book1")
+
+    sql = mock_cur.execute.call_args[0][0]
+    assert "book_id" in sql
+
+
+def test_pgvector_search_keyword_without_book_id_filter():
+    """search_keyword: book_id 未指定時は WHERE 句に book_id フィルタを含まない SQL。"""
+    from unittest.mock import MagicMock, patch
+
+    from workers.embed.pgvector_store import PgVectorStore
+
+    mock_conn = MagicMock()
+    mock_cur = MagicMock()
+    mock_conn.cursor.return_value.__enter__.return_value = mock_cur
+    mock_cur.fetchall.return_value = []
+
+    with patch("workers.embed.pgvector_store.psycopg.connect", return_value=mock_conn):
+        store = PgVectorStore("dsn://fake")
+        store.search_keyword("クエリ", top_k=5)
+
+    sql = mock_cur.execute.call_args[0][0]
+    assert "book_id = %(book_id)s" not in sql
+
+
+def test_retrieve_passes_book_id_to_store(monkeypatch):
+    """_retrieve(book_id=...) が store.search に book_id を伝播する。"""
+    monkeypatch.setattr(config, "RERANK_ENABLED", False)
+    monkeypatch.setattr(config, "HYBRID_ENABLED", False)
+    monkeypatch.setattr(config, "HYDE_ENABLED", False)
+
+    fake_embedder = MagicMock()
+    fake_embedder.embed.return_value = [[0.1]]
+
+    fake_store = MagicMock()
+    fake_store.search.return_value = [_make_chunk("b", 0)]
+
+    with (
+        patch("workers.embed.ollama_embedder.OllamaEmbedder", return_value=fake_embedder),
+        patch("workers.embed.pgvector_store.PgVectorStore", return_value=fake_store),
+    ):
+        server._retrieve("query", top_k=3, book_id="mybook")
+
+    fake_store.search.assert_called_once_with([0.1], top_k=3, book_id="mybook")

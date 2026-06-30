@@ -84,31 +84,20 @@ class PgVectorStore(VectorStore):
     def search_keyword(self, query: str, top_k: int, book_id: str | None = None) -> list[dict]:
         """pg_bigm 全文検索で query に関連するチャンクを返す（HYBRID_ENABLED 時）。"""
         escaped = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        book_cond = "book_id = %(book_id)s AND " if book_id is not None else ""
+        sql = f"""
+            SELECT book_id, chunk_index, title, author, chapter, section, page, text,
+                   bigm_similarity(text, %(q)s) AS score
+            FROM chunks
+            WHERE {book_cond}text LIKE %(pat)s ESCAPE '\\'
+            ORDER BY score DESC
+            LIMIT %(k)s
+        """
+        params: dict = {"q": query, "pat": f"%{escaped}%", "k": top_k}
+        if book_id is not None:
+            params["book_id"] = book_id
         with self.conn.cursor(row_factory=dict_row) as cur:
-            if book_id is not None:
-                cur.execute(
-                    """
-                    SELECT book_id, chunk_index, title, author, chapter, section, page, text,
-                           bigm_similarity(text, %(q)s) AS score
-                    FROM chunks
-                    WHERE book_id = %(book_id)s AND text LIKE %(pat)s ESCAPE '\\'
-                    ORDER BY score DESC
-                    LIMIT %(k)s
-                    """,
-                    {"q": query, "pat": f"%{escaped}%", "k": top_k, "book_id": book_id},
-                )
-            else:
-                cur.execute(
-                    """
-                    SELECT book_id, chunk_index, title, author, chapter, section, page, text,
-                           bigm_similarity(text, %(q)s) AS score
-                    FROM chunks
-                    WHERE text LIKE %(pat)s ESCAPE '\\'
-                    ORDER BY score DESC
-                    LIMIT %(k)s
-                    """,
-                    {"q": query, "pat": f"%{escaped}%", "k": top_k},
-                )
+            cur.execute(sql, params)
             return cur.fetchall()
 
     def close(self) -> None:

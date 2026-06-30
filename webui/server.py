@@ -89,12 +89,13 @@ def _safe_name(name: str) -> str:
     return base
 
 
-def _retrieve(query: str, top_k: int) -> list[dict]:
+def _retrieve(query: str, top_k: int, book_id: str | None = None) -> list[dict]:
     """クエリを埋め込み、pgvector から類似チャンクを取得する（同期・スレッドで実行）。
 
     HYDE_ENABLED   : 仮説回答を生成してからベクトル化する
     HYBRID_ENABLED : pg_bigm キーワード検索と RRF 融合する
     RERANK_ENABLED : CrossEncoder で再スコアリングして top_k に絞る
+    book_id        : 指定時はその書籍のチャンクのみを対象にする
     """
     from workers.embed.ollama_embedder import OllamaEmbedder
     from workers.embed.pgvector_store import PgVectorStore
@@ -109,10 +110,10 @@ def _retrieve(query: str, top_k: int) -> list[dict]:
     candidate_k = max(config.RERANK_CANDIDATE_K, top_k) if config.RERANK_ENABLED else top_k
     store = PgVectorStore(config.database_url())
     try:
-        chunks = store.search(vec, top_k=candidate_k)
+        chunks = store.search(vec, top_k=candidate_k, book_id=book_id)
         if config.HYBRID_ENABLED:
             try:
-                chunks = _hybrid_rrf(query, chunks, store, candidate_k)
+                chunks = _hybrid_rrf(query, chunks, store, candidate_k, book_id=book_id)
             except Exception as e:
                 logger.warning(
                     "HYBRID_ENABLED=true だがキーワード検索失敗（VEC検索にフォールバック）: %s", e
