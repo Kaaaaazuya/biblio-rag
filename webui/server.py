@@ -219,12 +219,13 @@ async def chat(request: Request) -> StreamingResponse:
     top_k: int = int(body.get("top_k", 5))
     persona: str = body.get("persona", "")
     lang: str = body.get("lang", "ja")
+    book_id: str | None = body.get("book_id") or None
 
     if not query:
         return JSONResponse({"detail": "query は必須です"}, status_code=400)
 
     loop = asyncio.get_running_loop()
-    chunks = await loop.run_in_executor(None, _retrieve, query, top_k)
+    chunks = await loop.run_in_executor(None, _retrieve, query, top_k, book_id)
 
     if config.CITATION_ENABLED:
         context = "\n\n".join(

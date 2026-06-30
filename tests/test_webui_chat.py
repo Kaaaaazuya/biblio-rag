@@ -58,7 +58,7 @@ def _fake_llm(lines: list[str]):
     return _Client
 
 
-def _fake_retrieve(query: str, top_k: int) -> list[dict]:
+def _fake_retrieve(query: str, top_k: int, book_id: str | None = None) -> list[dict]:
     return [
         {
             "book_id": "book1",
