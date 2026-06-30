@@ -58,7 +58,7 @@ def _fake_llm(lines: list[str]):
     return _Client
 
 
-def _fake_retrieve(query: str, top_k: int) -> list[dict]:
+def _fake_retrieve(query: str, top_k: int, book_id: str | None = None) -> list[dict]:
     return [
         {
             "book_id": "book1",
@@ -99,7 +99,7 @@ def test_retrieve_calls_embedder_and_store():
         result = server._retrieve("my query", 3)
 
     fake_embedder.embed.assert_called_once_with(["my query"])
-    fake_store.search.assert_called_once_with(fake_vec, top_k=3)
+    fake_store.search.assert_called_once_with(fake_vec, top_k=3, book_id=None)
     fake_store.close.assert_called_once()
     assert result == fake_results
 
@@ -112,6 +112,13 @@ def test_retrieve_calls_embedder_and_store():
 def test_chat_requires_query():
     res = _client.post("/api/chat", json={"query": ""})
     assert res.status_code == 400
+
+
+def test_chat_rejects_non_string_book_id():
+    """book_id が文字列以外（リスト等）のとき 400 を返す。"""
+    res = _client.post("/api/chat", json={"query": "テスト", "book_id": ["invalid"]})
+    assert res.status_code == 400
+    assert "book_id" in res.json()["detail"]
 
 
 def test_chat_sse_sources_event(monkeypatch):
