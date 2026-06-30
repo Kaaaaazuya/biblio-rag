@@ -25,23 +25,6 @@ ON CONFLICT (book_id, chunk_index) DO UPDATE SET
     embedding = EXCLUDED.embedding, embed_model = EXCLUDED.embed_model
 """
 
-_SEARCH = """
-SELECT book_id, chunk_index, title, author, chapter, section, page, text,
-       1 - (embedding <=> %(qv)s::vector) AS score
-FROM chunks
-ORDER BY embedding <=> %(qv)s::vector
-LIMIT %(k)s
-"""
-
-_SEARCH_WITH_BOOK_ID = """
-SELECT book_id, chunk_index, title, author, chapter, section, page, text,
-       1 - (embedding <=> %(qv)s::vector) AS score
-FROM chunks
-WHERE book_id = %(book_id)s
-ORDER BY embedding <=> %(qv)s::vector
-LIMIT %(k)s
-"""
-
 
 def _vec_literal(vec: Sequence[float]) -> str:
     return "[" + ",".join(str(float(x)) for x in vec) + "]"
@@ -59,14 +42,20 @@ class PgVectorStore(VectorStore):
     def search(
         self, query_vector: list[float], top_k: int, book_id: str | None = None
     ) -> list[dict]:
+        book_cond = "WHERE book_id = %(book_id)s" if book_id is not None else ""
+        sql = f"""
+            SELECT book_id, chunk_index, title, author, chapter, section, page, text,
+                   1 - (embedding <=> %(qv)s::vector) AS score
+            FROM chunks
+            {book_cond}
+            ORDER BY embedding <=> %(qv)s::vector
+            LIMIT %(k)s
+        """
+        params: dict = {"qv": _vec_literal(query_vector), "k": top_k}
+        if book_id is not None:
+            params["book_id"] = book_id
         with self.conn.cursor(row_factory=dict_row) as cur:
-            if book_id is not None:
-                cur.execute(
-                    _SEARCH_WITH_BOOK_ID,
-                    {"qv": _vec_literal(query_vector), "k": top_k, "book_id": book_id},
-                )
-            else:
-                cur.execute(_SEARCH, {"qv": _vec_literal(query_vector), "k": top_k})
+            cur.execute(sql, params)
             return cur.fetchall()
 
     def count_book(self, book_id: str) -> int:

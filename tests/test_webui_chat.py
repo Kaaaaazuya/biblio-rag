@@ -114,6 +114,13 @@ def test_chat_requires_query():
     assert res.status_code == 400
 
 
+def test_chat_rejects_non_string_book_id():
+    """book_id が文字列以外（リスト等）のとき 400 を返す。"""
+    res = _client.post("/api/chat", json={"query": "テスト", "book_id": ["invalid"]})
+    assert res.status_code == 400
+    assert "book_id" in res.json()["detail"]
+
+
 def test_chat_sse_sources_event(monkeypatch):
     monkeypatch.setattr(server, "_retrieve", _fake_retrieve)
     monkeypatch.setattr(

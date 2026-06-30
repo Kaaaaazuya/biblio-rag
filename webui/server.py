@@ -219,7 +219,10 @@ async def chat(request: Request) -> StreamingResponse:
     top_k: int = int(body.get("top_k", 5))
     persona: str = body.get("persona", "")
     lang: str = body.get("lang", "ja")
-    book_id: str | None = body.get("book_id") or None
+    book_id_raw = body.get("book_id")
+    if book_id_raw is not None and not isinstance(book_id_raw, str):
+        return JSONResponse({"detail": "book_id は文字列である必要があります"}, status_code=400)
+    book_id: str | None = book_id_raw or None
 
     if not query:
         return JSONResponse({"detail": "query は必須です"}, status_code=400)
