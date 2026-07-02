@@ -370,10 +370,14 @@ async def chat(request: Request) -> StreamingResponse | JSONResponse:
                         continue
                     if err := data.get("error"):
                         logger.error(f"Ollama error: {err}")
+                        error_msg = (
+                            "An error occurred while generating a response. "
+                            "Please try again."
+                        )
                         msg = json.dumps(
                             {
                                 "type": "error",
-                                "message": "An error occurred while generating a response. Please try again.",
+                                "message": error_msg,
                             },
                             ensure_ascii=False,
                         )
