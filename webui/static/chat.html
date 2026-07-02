@@ -287,6 +287,30 @@
       #send-btn:hover:not(:disabled) { background: var(--accent-hover); }
       #send-btn:disabled { opacity: .45; cursor: not-allowed; }
 
+      /* Abort button (shown while streaming) */
+      #abort-btn {
+        flex-shrink: 0;
+        width: 40px;
+        height: 40px;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        background: var(--bg-input);
+        color: var(--text-main);
+        font-size: 18px;
+        cursor: pointer;
+        display: none;
+        align-items: center;
+        justify-content: center;
+        transition: background .15s, border-color .15s;
+      }
+
+      #abort-btn:hover {
+        background: var(--bg-page);
+        border-color: var(--accent);
+      }
+
+      #abort-btn.visible { display: flex; }
+
       .hint {
         margin-top: 6px;
         font-size: 11px;
@@ -368,6 +392,7 @@
         <div class="input-row">
           <textarea id="query" rows="1" placeholder="質問を入力"></textarea>
           <button id="send-btn" title="送信">↑</button>
+          <button id="abort-btn" title="キャンセル">✕</button>
         </div>
         <p class="hint">ボタンまたは Shift+Enter で送信</p>
       </div>
