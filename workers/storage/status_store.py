@@ -26,6 +26,12 @@ class StatusStore:
         """
         self.conn = psycopg.connect(dsn, autocommit=False)
 
+    def __enter__(self) -> StatusStore:
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+        self.close()
+
     def set_status(self, book_id: str, status: str, error_msg: str | None = None) -> None:
         """Record ingestion status for a book.
 

@@ -17,7 +17,6 @@ import contextlib
 import json
 import logging
 import re
-import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import quote
@@ -42,25 +41,31 @@ STATIC_DIR = Path(__file__).parent / "static"
 MAX_UPLOAD_SIZE = 500 * 1024 * 1024
 
 # 取り込みステータスの永続ストア（PostgreSQL-backed）
+# テスト用のモック インスタンス（None の場合は新規作成）
 _status_store: StatusStore | None = None
-_status_store_lock = threading.Lock()
 
 
 def _get_status_store() -> StatusStore:
-    """Lazy-initialize status store on first use."""
+    """Get status store instance. Returns the mocked instance if set in tests, otherwise a new instance.
+
+    Returns a new instance per call to ensure thread-safety with psycopg connections.
+    Tests can set _status_store to a mock for testing without DB.
+    """
     global _status_store
-    if _status_store is None:
-        with _status_store_lock:
-            if _status_store is None:
-                _status_store = StatusStore(config.database_url())
-    return _status_store
+    if _status_store is not None:
+        return _status_store
+    return StatusStore(config.database_url())
 
 
 def _set_status(book_id: str, status: str, error: str | None = None) -> None:
     """Record ingestion status to persistent storage."""
     try:
         store = _get_status_store()
-        store.set_status(book_id, status, error_msg=error)
+        try:
+            store.set_status(book_id, status, error_msg=error)
+        finally:
+            if store is not _status_store:
+                store.close()
     except Exception as e:  # noqa: BLE001
         logger.error(f"Failed to persist status for book_id={book_id}: {e}", exc_info=True)
 
@@ -535,28 +540,30 @@ async def ingest(request: Request) -> JSONResponse:
     return JSONResponse({"book_id": book_id, "status": "pending"}, background=tasks)
 
 
-async def ingest_status(request: Request) -> JSONResponse:
+def ingest_status(request: Request) -> JSONResponse:
     """取り込みステータスを返す（永続ストアから）。"""
     book_id = request.path_params["book_id"]
     try:
         store = _get_status_store()
-        status_record = store.get_current_status(book_id)
-        if status_record:
-            # Format response to match expected schema
-            return JSONResponse({
-                "status": status_record.get("status", "unknown"),
-                "chunks_processed": status_record.get("chunks_processed", 0),
-                "error": status_record.get("error_msg"),
-                "updated_at": status_record.get("updated_at"),
-            })
-        else:
-            # No status found - return unknown
-            return JSONResponse({
-                "status": "unknown",
-                "chunks_processed": 0,
-                "error": None,
-                "updated_at": None,
-            })
+        try:
+            status_record = store.get_current_status(book_id)
+            if status_record:
+                return JSONResponse({
+                    "status": status_record.get("status", "unknown"),
+                    "chunks_processed": status_record.get("chunks_processed", 0),
+                    "error": status_record.get("error_msg"),
+                    "updated_at": status_record.get("updated_at"),
+                })
+            else:
+                return JSONResponse({
+                    "status": "unknown",
+                    "chunks_processed": 0,
+                    "error": None,
+                    "updated_at": None,
+                })
+        finally:
+            if store is not _status_store:
+                store.close()
     except Exception as e:  # noqa: BLE001
         logger.error(f"Failed to retrieve status for book_id={book_id}: {e}", exc_info=True)
         return JSONResponse(
@@ -565,25 +572,28 @@ async def ingest_status(request: Request) -> JSONResponse:
         )
 
 
-async def ingest_status_history(request: Request) -> JSONResponse:
+def ingest_status_history(request: Request) -> JSONResponse:
     """取り込みステータスの履歴を返す（全トランジション）。"""
     book_id = request.path_params["book_id"]
     try:
         store = _get_status_store()
-        history = store.get_status_history(book_id)
-        if not history:
-            return JSONResponse([])
-        # Format response
-        formatted_history = [
-            {
-                "status": record.get("status"),
-                "chunks_processed": record.get("chunks_processed", 0),
-                "error": record.get("error_msg"),
-                "created_at": record.get("created_at"),
-            }
-            for record in history
-        ]
-        return JSONResponse(formatted_history)
+        try:
+            history = store.get_status_history(book_id)
+            if not history:
+                return JSONResponse([])
+            formatted_history = [
+                {
+                    "status": record.get("status"),
+                    "chunks_processed": record.get("chunks_processed", 0),
+                    "error": record.get("error_msg"),
+                    "created_at": record.get("created_at"),
+                }
+                for record in history
+            ]
+            return JSONResponse(formatted_history)
+        finally:
+            if store is not _status_store:
+                store.close()
     except Exception as e:  # noqa: BLE001
         logger.error(f"Failed to retrieve status history for book_id={book_id}: {e}", exc_info=True)
         return JSONResponse(
@@ -617,12 +627,11 @@ def check_embedding_service() -> bool:
         return False
 
 
-async def health(request: Request) -> JSONResponse:
+def health(request: Request) -> JSONResponse:
     """ヘルスチェックエンドポイント。DB と Ollama の接続状態をチェックする。"""
     db_ok = check_database_connectivity()
     embedding_ok = check_embedding_service()
 
-    # すべてのサービスが正常なら 200、ひとつでも異常なら 503
     status_code = 200 if (db_ok and embedding_ok) else 503
     status = "healthy" if (db_ok and embedding_ok) else "unhealthy"
 
