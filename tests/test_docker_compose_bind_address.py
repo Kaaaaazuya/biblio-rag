@@ -150,7 +150,10 @@ def test_docker_images_have_pinned_versions():
 
         # Check that image has a version tag or digest
         # Valid formats: name:version (e.g., postgres:17.2) or name@sha256:...
-        has_version_or_digest = ":" in image or "@" in image
+        # We check the last part of the image name to avoid false positives from registry ports
+        # (e.g., registry:5000/image)
+        last_part = image.split("/")[-1]
+        has_version_or_digest = ":" in last_part or "@" in image
         assert has_version_or_digest, \
             f"Service '{service_name}' has no version or digest specified. " \
             f"Image: {image}. Use format 'name:version' or 'name@sha256:digest'"

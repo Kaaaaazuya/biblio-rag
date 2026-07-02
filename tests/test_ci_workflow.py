@@ -27,16 +27,18 @@ def test_ci_workflow_triggers():
     on_config = workflow.get("on") or workflow.get(True)
     assert on_config is not None, "'on' キーが定義されていません"
 
-    # push と pull_request の両方がトリガーに含まれる
-    if isinstance(on_config, list):
+    # triggers リストを正規化（型による分岐を避ける）
+    if isinstance(on_config, str):
+        triggers = [on_config]
+    elif isinstance(on_config, list):
         triggers = on_config
     elif isinstance(on_config, dict):
         triggers = list(on_config.keys())
     else:
         triggers = []
 
-    assert "push" in triggers or "push" in on_config, "push トリガーが定義されていません"
-    assert "pull_request" in triggers or "pull_request" in on_config, "pull_request トリガーが定義されていません"
+    assert "push" in triggers, "push トリガーが定義されていません"
+    assert "pull_request" in triggers, "pull_request トリガーが定義されていません"
 
 
 def test_ci_workflow_has_jobs():
