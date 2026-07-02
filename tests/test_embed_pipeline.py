@@ -68,12 +68,14 @@ def test_embed_and_store_attaches_embed_model():
     assert stored[0]["embed_model"] == "bge-m3"
 
 
-def test_embed_and_store_no_model_omits_field():
+def test_embed_and_store_no_model_uses_active_embed_model(monkeypatch):
+    monkeypatch.setattr(config, "EMBED_BACKEND", "ollama")
+    monkeypatch.setattr(config, "EMBED_MODEL", "bge-m3-custom")
     recs = [{"book_id": "b", "chunk_index": 0, "text": "t"}]
     store = _FakeStore()
     embed_and_store(recs, _FakeEmbedder(), store)
     stored = store.upserted[0][0]
-    assert "embed_model" not in stored[0]
+    assert stored[0]["embed_model"] == "bge-m3-custom"
 
 
 def test_embed_and_store_atomic_delegates_to_store():
