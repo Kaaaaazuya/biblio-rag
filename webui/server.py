@@ -18,6 +18,7 @@ import json
 import logging
 import re
 import threading
+from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import quote
 
@@ -31,7 +32,7 @@ from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
 from workers import config
-from workers.storage import RAW_PREFIX
+from workers.storage import RAW_PREFIX, StatusStore
 
 logger = logging.getLogger(__name__)
 
@@ -40,14 +41,28 @@ STATIC_DIR = Path(__file__).parent / "static"
 # アップロードサイズ上限: 500MB
 MAX_UPLOAD_SIZE = 500 * 1024 * 1024
 
-# 取り込みステータスのインメモリストア（プロセス再起動でリセット）
-_status: dict[str, dict] = {}
-_status_lock = threading.Lock()
+# 取り込みステータスの永続ストア（PostgreSQL-backed）
+_status_store: StatusStore | None = None
+_status_store_lock = threading.Lock()
+
+
+def _get_status_store() -> StatusStore:
+    """Lazy-initialize status store on first use."""
+    global _status_store
+    if _status_store is None:
+        with _status_store_lock:
+            if _status_store is None:
+                _status_store = StatusStore(config.database_url())
+    return _status_store
 
 
 def _set_status(book_id: str, status: str, error: str | None = None) -> None:
-    with _status_lock:
-        _status[book_id] = {"status": status, "error": error}
+    """Record ingestion status to persistent storage."""
+    try:
+        store = _get_status_store()
+        store.set_status(book_id, status, error_msg=error)
+    except Exception as e:  # noqa: BLE001
+        logger.error(f"Failed to persist status for book_id={book_id}: {e}", exc_info=True)
 
 
 def _run_pipeline(book_id: str) -> None:
@@ -59,19 +74,17 @@ def _run_pipeline(book_id: str) -> None:
         from workers.extract.extract import extract_pdf_to_markdown
         from workers.storage import ObjectStore
 
-        _set_status(book_id, "extracting")
+        _set_status(book_id, "processing")
         store = ObjectStore()
         pdf_bytes = store.get_bytes(f"{RAW_PREFIX}{book_id}.pdf")
         md = extract_pdf_to_markdown(pdf_bytes)
         store.put_text(f"normalized/{book_id}.md", md)
 
-        _set_status(book_id, "chunking")
         meta = store.get_meta(f"{RAW_PREFIX}{book_id}.pdf")
         meta["book_id"] = book_id
         records = HeuristicChunker().chunk(md, meta)
         store.put_jsonl(f"chunks/{book_id}.jsonl", records)
 
-        _set_status(book_id, "embedding")
         embedder = make_embedder()
         vec_store = PgVectorStore(config.database_url())
         try:
@@ -79,7 +92,7 @@ def _run_pipeline(book_id: str) -> None:
         finally:
             vec_store.close()
 
-        _set_status(book_id, "done")
+        _set_status(book_id, "completed")
     except Exception as e:  # noqa: BLE001
         logger.error(f"Pipeline failed for book_id={book_id}: {e}", exc_info=True)
         _set_status(book_id, "failed", "An error occurred while processing. Please try again.")
@@ -278,7 +291,7 @@ def _validate_chat_input(body: dict) -> tuple[str | None, int]:
     return (None, 200)
 
 
-async def chat(request: Request) -> StreamingResponse:
+async def chat(request: Request) -> StreamingResponse | JSONResponse:
     """RAG チャット: クエリ埋め込み → pgvector 検索 → Ollama 生成（SSE ストリーム）。"""
     body = await request.json()
 
@@ -294,7 +307,14 @@ async def chat(request: Request) -> StreamingResponse:
     lang: str = body.get("lang", "ja")
 
     loop = asyncio.get_running_loop()
-    chunks = await loop.run_in_executor(None, _retrieve, query, top_k)
+    try:
+        chunks = await loop.run_in_executor(None, _retrieve, query, top_k)
+    except Exception as e:  # noqa: BLE001
+        logger.error(f"Retrieval error: {e}", exc_info=True)
+        return JSONResponse(
+            {"detail": "An error occurred while retrieving documents. Please try again."},
+            status_code=500,
+        )
 
     if config.CITATION_ENABLED:
         context = "\n\n".join(
@@ -516,19 +536,116 @@ async def ingest(request: Request) -> JSONResponse:
 
 
 async def ingest_status(request: Request) -> JSONResponse:
-    """取り込みステータスを返す。"""
+    """取り込みステータスを返す（永続ストアから）。"""
     book_id = request.path_params["book_id"]
-    with _status_lock:
-        s = dict(_status.get(book_id, {"status": "unknown", "error": None}))
-    return JSONResponse(s)
+    try:
+        store = _get_status_store()
+        status_record = store.get_current_status(book_id)
+        if status_record:
+            # Format response to match expected schema
+            return JSONResponse({
+                "status": status_record.get("status", "unknown"),
+                "chunks_processed": status_record.get("chunks_processed", 0),
+                "error": status_record.get("error_msg"),
+                "updated_at": status_record.get("updated_at"),
+            })
+        else:
+            # No status found - return unknown
+            return JSONResponse({
+                "status": "unknown",
+                "chunks_processed": 0,
+                "error": None,
+                "updated_at": None,
+            })
+    except Exception as e:  # noqa: BLE001
+        logger.error(f"Failed to retrieve status for book_id={book_id}: {e}", exc_info=True)
+        return JSONResponse(
+            {"detail": "Failed to retrieve status. Please try again."},
+            status_code=500,
+        )
+
+
+async def ingest_status_history(request: Request) -> JSONResponse:
+    """取り込みステータスの履歴を返す（全トランジション）。"""
+    book_id = request.path_params["book_id"]
+    try:
+        store = _get_status_store()
+        history = store.get_status_history(book_id)
+        if not history:
+            return JSONResponse([])
+        # Format response
+        formatted_history = [
+            {
+                "status": record.get("status"),
+                "chunks_processed": record.get("chunks_processed", 0),
+                "error": record.get("error_msg"),
+                "created_at": record.get("created_at"),
+            }
+            for record in history
+        ]
+        return JSONResponse(formatted_history)
+    except Exception as e:  # noqa: BLE001
+        logger.error(f"Failed to retrieve status history for book_id={book_id}: {e}", exc_info=True)
+        return JSONResponse(
+            {"detail": "Failed to retrieve status history. Please try again."},
+            status_code=500,
+        )
+
+
+
+def check_database_connectivity() -> bool:
+    """PostgreSQL への接続をテストする。接続可能なら True、失敗したら False を返す。"""
+    try:
+        from workers.embed.pgvector_store import PgVectorStore
+
+        vec_store = PgVectorStore(config.database_url())
+        try:
+            vec_store.close()
+            return True
+        except Exception:  # noqa: BLE001
+            return False
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def check_embedding_service() -> bool:
+    """Ollama 埋め込みサービスへの接続をテストする。接続可能なら True、失敗したら False を返す。"""
+    try:
+        resp = httpx.get(f"{config.OLLAMA_HOST}/api/tags", timeout=5.0)
+        return resp.status_code == 200
+    except Exception:  # noqa: BLE001
+        return False
+
+
+async def health(request: Request) -> JSONResponse:
+    """ヘルスチェックエンドポイント。DB と Ollama の接続状態をチェックする。"""
+    db_ok = check_database_connectivity()
+    embedding_ok = check_embedding_service()
+
+    # すべてのサービスが正常なら 200、ひとつでも異常なら 503
+    status_code = 200 if (db_ok and embedding_ok) else 503
+    status = "healthy" if (db_ok and embedding_ok) else "unhealthy"
+
+    response = {
+        "status": status,
+        "services": {
+            "db": "ok" if db_ok else "unreachable",
+            "embedding": "ok" if embedding_ok else "unreachable",
+        },
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+
+    return JSONResponse(response, status_code=status_code)
 
 
 app = Starlette(
     routes=[
+        Route("/api/health", health, methods=["GET"]),
         Route("/api/presign", presign, methods=["POST"]),
         Route("/api/meta", save_meta, methods=["POST"]),
         Route("/api/ingest", ingest, methods=["POST"]),
         Route("/api/ingest/{book_id}/status", ingest_status, methods=["GET"]),
+        Route("/api/ingest/{book_id}/status/history", ingest_status_history, methods=["GET"]),
         Route("/api/chat", chat, methods=["POST"]),
         # 静的フロント（最後にマウント。html=True で / に index.html を返す）
         Mount("/", app=StaticFiles(directory=STATIC_DIR, html=True), name="static"),

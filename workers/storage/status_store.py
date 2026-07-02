@@ -1,0 +1,96 @@
+"""Persistent ingestion status storage using PostgreSQL.
+
+Replaces in-memory dict with database-backed storage that survives server restarts.
+Provides interface for tracking status transitions and maintaining historical records.
+"""
+
+from __future__ import annotations
+
+from datetime import datetime
+
+import psycopg
+from psycopg.rows import dict_row
+
+
+class StatusStore:
+    """PostgreSQL-backed ingestion status store.
+
+    Maintains current status and historical records for each book.
+    """
+
+    def __init__(self, dsn: str):
+        """Initialize connection to PostgreSQL.
+
+        Args:
+            dsn: Database connection string (e.g., postgresql://user:pass@host/db)
+        """
+        self.conn = psycopg.connect(dsn, autocommit=False)
+
+    def set_status(self, book_id: str, status: str, error_msg: str | None = None) -> None:
+        """Record ingestion status for a book.
+
+        Args:
+            book_id: Identifier for the book being ingested
+            status: Current status ('pending', 'processing', 'completed', 'failed')
+            error_msg: Optional error message if status is 'failed'
+        """
+        with self.conn.transaction():
+            with self.conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO ingestion_status
+                        (book_id, status, error_msg, created_at, updated_at)
+                    VALUES (%(book_id)s, %(status)s, %(error_msg)s, now(), now())
+                    """,
+                    {"book_id": book_id, "status": status, "error_msg": error_msg},
+                )
+
+    def get_current_status(self, book_id: str) -> dict | None:
+        """Get the most recent status for a book.
+
+        Args:
+            book_id: Identifier for the book
+
+        Returns:
+            Dict with keys: book_id, status, chunks_processed, error_msg, updated_at
+            Returns None if no status found for this book
+        """
+        with self.conn.transaction():
+            with self.conn.cursor(row_factory=dict_row) as cur:
+                cur.execute(
+                    """
+                    SELECT book_id, status, chunks_processed, error_msg, updated_at
+                    FROM ingestion_status
+                    WHERE book_id = %(book_id)s
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                    """,
+                    {"book_id": book_id},
+                )
+                return cur.fetchone()
+
+    def get_status_history(self, book_id: str) -> list[dict]:
+        """Get all status transitions for a book in chronological order.
+
+        Args:
+            book_id: Identifier for the book
+
+        Returns:
+            List of dicts with keys: book_id, status, chunks_processed, error_msg, created_at
+        """
+        with self.conn.transaction():
+            with self.conn.cursor(row_factory=dict_row) as cur:
+                cur.execute(
+                    """
+                    SELECT book_id, status, chunks_processed, error_msg, created_at
+                    FROM ingestion_status
+                    WHERE book_id = %(book_id)s
+                    ORDER BY created_at ASC
+                    """,
+                    {"book_id": book_id},
+                )
+                return cur.fetchall()
+
+    def close(self) -> None:
+        """Close database connection."""
+        self.conn.close()
