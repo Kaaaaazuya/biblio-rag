@@ -245,7 +245,7 @@ def _validate_chat_input(body: dict) -> tuple[str | None, int]:
         top_k = int(body.get("top_k", 5))
         if top_k < 1 or top_k > 100:
             return ("top_k は 1～100 の範囲で指定してください", 422)
-    except (ValueError, TypeError):
+    except ValueError, TypeError:
         return ("top_k は整数である必要があります", 422)
 
     # history の検証
@@ -345,7 +345,10 @@ async def chat(request: Request) -> StreamingResponse:
                         msg = json.dumps(
                             {
                                 "type": "error",
-                                "message": "An error occurred while generating a response. Please try again.",
+                                "message": (
+                                    "An error occurred while generating a response. "
+                                    "Please try again."
+                                ),
                             },
                             ensure_ascii=False,
                         )
@@ -386,14 +389,12 @@ async def presign(request: Request) -> JSONResponse:
 
     # Content-Length チェック
     content_length = body.get("content_length")
-    if content_length is not None:
-        if content_length > MAX_UPLOAD_SIZE:
-            return JSONResponse(
-                {
-                    "detail": f"ファイルサイズが大きすぎます。上限は {MAX_UPLOAD_SIZE // (1024 * 1024)}MB です。"
-                },
-                status_code=413,
-            )
+    if content_length is not None and content_length > MAX_UPLOAD_SIZE:
+        max_mb = MAX_UPLOAD_SIZE // (1024 * 1024)
+        return JSONResponse(
+            {"detail": f"ファイルサイズが大きすぎます。上限は {max_mb}MB です。"},
+            status_code=413,
+        )
 
     key = f"{RAW_PREFIX}{name}"
 
@@ -401,9 +402,7 @@ async def presign(request: Request) -> JSONResponse:
     try:
         if _object_exists(config.S3_BUCKET, key):
             return JSONResponse(
-                {
-                    "detail": "このファイル名のオブジェクトは既に存在します。別の名前でアップロードしてください。"
-                },
+                {"detail": "このファイル名は既に存在します。別の名前で再試行してください。"},
                 status_code=409,
             )
     except ClientError as e:
@@ -453,14 +452,12 @@ async def save_meta(request: Request) -> JSONResponse:
 
     # Content-Length チェック
     content_length = body.get("content_length")
-    if content_length is not None:
-        if content_length > MAX_UPLOAD_SIZE:
-            return JSONResponse(
-                {
-                    "detail": f"ファイルサイズが大きすぎます。上限は {MAX_UPLOAD_SIZE // (1024 * 1024)}MB です。"
-                },
-                status_code=413,
-            )
+    if content_length is not None and content_length > MAX_UPLOAD_SIZE:
+        max_mb = MAX_UPLOAD_SIZE // (1024 * 1024)
+        return JSONResponse(
+            {"detail": f"ファイルサイズが大きすぎます。上限は {max_mb}MB です。"},
+            status_code=413,
+        )
 
     try:
         book_id = _safe_name(body.get("book_id", ""))

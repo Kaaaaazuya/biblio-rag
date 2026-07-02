@@ -169,7 +169,7 @@ def test_retrieve_rerank_enabled(monkeypatch):
     ):
         result = server._retrieve("query", top_k=1)
 
-    fake_store.search.assert_called_once_with([0.1], top_k=20)
+    fake_store.search.assert_called_once_with([0.1], top_k=20, embed_model="bge-m3")
     fake_reranker.rerank.assert_called_once_with("query", candidates, 1)
     assert result == reranked
 

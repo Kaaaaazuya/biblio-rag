@@ -1,6 +1,6 @@
 """WebUI バックエンドのテスト（presign は署名のみでオフライン・MinIO 不要）。"""
 
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from starlette.testclient import TestClient
 
@@ -9,8 +9,17 @@ from webui import server
 client = TestClient(server.app)
 
 
+def _mock_s3_client():
+    mock_s3 = MagicMock()
+    mock_s3.generate_presigned_url.return_value = "http://minio.local/signed-url"
+    return mock_s3
+
+
 def test_presign_returns_url_and_key():
-    with patch("webui.server._object_exists", return_value=False):
+    with (
+        patch("webui.server._object_exists", return_value=False),
+        patch("workers.config.s3_client", return_value=_mock_s3_client()),
+    ):
         res = client.post("/api/presign", json={"filename": "本の名前.pdf"})
     assert res.status_code == 200
     data = res.json()
@@ -26,7 +35,10 @@ def test_presign_rejects_non_pdf():
 
 def test_presign_sanitizes_path_traversal():
     # ディレクトリ要素は除去され raw/ 直下になる
-    with patch("webui.server._object_exists", return_value=False):
+    with (
+        patch("webui.server._object_exists", return_value=False),
+        patch("workers.config.s3_client", return_value=_mock_s3_client()),
+    ):
         res = client.post("/api/presign", json={"filename": "../../etc/passwd.pdf"})
     assert res.status_code == 200
     assert res.json()["key"] == "raw/passwd.pdf"

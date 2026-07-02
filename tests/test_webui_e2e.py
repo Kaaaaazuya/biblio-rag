@@ -112,7 +112,6 @@ def test_chat_ui_xss_sanitization_dompurify_loaded():
 
     XSS 脆弱性対策: DOMPurify ライブラリが HTML に含まれていることを検証。
     """
-    import subprocess
     from pathlib import Path
 
     html_file = Path(__file__).parent.parent / "webui" / "static" / "chat.html"
