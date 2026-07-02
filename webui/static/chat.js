@@ -225,8 +225,15 @@ async function sendMessage() {
 
     if (fullContent) {
       try {
-        bubble.innerHTML = marked.parse(fullContent);
-        bubble.classList.add("rendered");
+        const html = marked.parse(fullContent);
+        // XSS protection: Markdown レンダリング結果をサニタイズ
+        if (typeof DOMPurify === "undefined") {
+          console.error("DOMPurify not loaded; XSS protection unavailable");
+          bubble.textContent = fullContent;
+        } else {
+          bubble.innerHTML = DOMPurify.sanitize(html);
+          bubble.classList.add("rendered");
+        }
       } catch (_) {
         bubble.textContent = fullContent;
       }

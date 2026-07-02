@@ -14,7 +14,7 @@ services:
     env_file:
       - ../.env
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
       # スキーマは初回起動（データ空）時に自動適用される
@@ -30,7 +30,7 @@ services:
     container_name: biblio-ollama
     restart: unless-stopped
     ports:
-      - "11434:11434"
+      - "127.0.0.1:11434:11434"
     volumes:
       - ollama:/root/.ollama
     healthcheck:
@@ -51,8 +51,8 @@ services:
       # ブラウザから presigned URL で直接 PUT できるよう CORS を許可（開発用）
       MINIO_API_CORS_ALLOW_ORIGIN: "*"
     ports:
-      - "9000:9000"   # S3 API エンドポイント
-      - "9001:9001"   # 管理コンソール（http://localhost:9001）
+      - "127.0.0.1:9000:9000"   # S3 API エンドポイント
+      - "127.0.0.1:9001:9001"   # 管理コンソール（http://localhost:9001）
     volumes:
       - minio:/data
 
@@ -67,7 +67,7 @@ services:
     container_name: biblio-localstack
     restart: unless-stopped
     ports:
-      - "4566:4566"
+      - "127.0.0.1:4566:4566"
     environment:
       # SERVICES は絞らない（lambda が依存する iam/sts も community で必要）。
       LAMBDA_DOCKER_NETWORK: "biblio-net"

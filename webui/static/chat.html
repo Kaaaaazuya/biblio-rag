@@ -387,7 +387,9 @@
       </div>
     </div>
 
-    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="/static/lib/marked.min.js"></script>
+    <!-- DOMPurify for XSS protection -->
+    <script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.6/dist/purify.min.js" integrity="sha384-mfbCq1xrGzDDH3V3xRFB8kpD5K2QHMcJqMvWnxc9Y7vMVHxwL5hv6iFvpUj6L0FU" crossorigin="anonymous"></script>
     <script src="/chat.js"></script>
   </body>
 </html>

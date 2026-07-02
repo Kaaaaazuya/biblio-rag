@@ -38,6 +38,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from workers import config  # noqa: E402
 from workers.embed.ollama_embedder import OllamaEmbedder  # noqa: E402
 from workers.embed.pgvector_store import PgVectorStore  # noqa: E402
+from workers.embed.pipeline import active_embed_model  # noqa: E402
 
 
 def _relevant(hit: dict, item: dict) -> bool:
@@ -103,7 +104,7 @@ def evaluate(queries: list[dict], embedder: OllamaEmbedder, store: PgVectorStore
         candidate_k = max(config.RERANK_CANDIDATE_K, top_k) if config.RERANK_ENABLED else top_k
         # book_id 指定時は取りこぼし防止に多めに取る
         fetch_k = candidate_k * 3 if item.get("book_id") else candidate_k
-        hits = store.search(vec, fetch_k)
+        hits = store.search(vec, fetch_k, embed_model=active_embed_model())
 
         if reranker and hits:
             hits = reranker.rerank(item["q"], hits, top_k)

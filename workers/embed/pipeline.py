@@ -41,9 +41,34 @@ def embed_and_store(
     if not records:
         return 0
     vectors = embedder.embed([r["text"] for r in records])
-    if embed_model:
-        records = [{**r, "embed_model": embed_model} for r in records]
+    # Always set embed_model to ensure it's present in the record dictionary
+    # Use provided value or default to currently active model
+    model_to_use = embed_model or active_embed_model()
+    records = [{**r, "embed_model": model_to_use} for r in records]
     store.upsert(records, vectors)
+    return len(records)
+
+
+def embed_and_store_atomic(
+    book_id: str,
+    records: list[dict],
+    embedder: Embedder,
+    store: VectorStore,
+    embed_model: str = "",
+) -> int:
+    """チャンク群を埋め込み、既存チャンクと原子的に置き換える。
+
+    既存チャンク削除と新規チャンク投入を同一トランザクション内で実行し、
+    中間状態（削除済みだが一部未投入）の発生を防ぐ。
+    """
+    if not records:
+        return 0
+    vectors = embedder.embed([r["text"] for r in records])
+    # Always set embed_model to ensure it's present in the record dictionary
+    # Use provided value or default to currently active model
+    model_to_use = embed_model or active_embed_model()
+    records = [{**r, "embed_model": model_to_use} for r in records]
+    store.atomic_delete_and_upsert(book_id, records, vectors)
     return len(records)
 
 
@@ -80,8 +105,13 @@ def _cli(argv: list[str]) -> int:
                 print(f"スキップ（格納済み）: {key} (book_id={book_id})")
                 continue
             if exists:
-                vec_store.delete_book(book_id)
-            n = embed_and_store(records, embedder, vec_store, embed_model=model_name)
+                # Re-ingestion: use atomic delete + insert to prevent partial failures
+                n = embed_and_store_atomic(
+                    book_id, records, embedder, vec_store, embed_model=model_name
+                )
+            else:
+                # New ingestion: regular upsert is fine
+                n = embed_and_store(records, embedder, vec_store, embed_model=model_name)
             print(f"s3://{obj_store.bucket}/{key} -> pgvector ({n} chunks)")
     finally:
         vec_store.close()
