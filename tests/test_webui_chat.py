@@ -104,6 +104,37 @@ def test_retrieve_calls_embedder_and_store():
     assert result == fake_results
 
 
+def test_retrieve_hyde_failure_falls_back_to_original_query(monkeypatch):
+    """HyDE が失敗した場合、元のクエリで埋め込みと検索を行う。"""
+    fake_vec = [0.5, 0.6, 0.7]
+    fake_results = [{"book_id": "b", "text": "t", "title": "T"}]
+
+    fake_embedder = MagicMock()
+    fake_embedder.embed.return_value = [fake_vec]
+
+    fake_store = MagicMock()
+    fake_store.search.return_value = fake_results
+
+    # HyDE を失敗させる
+    monkeypatch.setattr(server, "_hyde", side_effect=RuntimeError("HyDE service unavailable"))
+    # HYDE_ENABLED を True に設定
+    monkeypatch.setattr(server.config, "HYDE_ENABLED", True)
+    monkeypatch.setattr(server.config, "HYBRID_ENABLED", False)
+    monkeypatch.setattr(server.config, "RERANK_ENABLED", False)
+
+    with (
+        patch("workers.embed.ollama_embedder.OllamaEmbedder", return_value=fake_embedder),
+        patch("workers.embed.pgvector_store.PgVectorStore", return_value=fake_store),
+    ):
+        result = server._retrieve("original query", 3)
+
+    # 元のクエリで埋め込みが呼ばれるべき（HyDE の結果ではなく）
+    fake_embedder.embed.assert_called_once_with(["original query"])
+    fake_store.search.assert_called_once_with(fake_vec, top_k=3)
+    fake_store.close.assert_called_once()
+    assert result == fake_results
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # /api/chat SSE エンドポイントのテスト
 # ─────────────────────────────────────────────────────────────────────────────

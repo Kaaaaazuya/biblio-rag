@@ -98,7 +98,9 @@ def _retrieve(query: str, top_k: int) -> list[dict]:
 
     search_query = query
     if config.HYDE_ENABLED:
-        search_query = _hyde(query)
+        with contextlib.suppress(Exception):
+            # HyDE 失敗時は元のクエリにフォールバック
+            search_query = _hyde(query)
 
     embedder = OllamaEmbedder(config.OLLAMA_HOST, config.EMBED_MODEL, config.EMBED_DIM)
     vec = embedder.embed([search_query])[0]
