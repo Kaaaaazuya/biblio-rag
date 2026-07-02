@@ -77,5 +77,5 @@ jobs:
 
       - name: Run gitleaks
         uses: gitleaks/gitleaks-action@v2
-        with:
-          token: ${{ github.token }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
