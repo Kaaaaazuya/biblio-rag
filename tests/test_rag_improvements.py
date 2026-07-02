@@ -165,11 +165,12 @@ def test_retrieve_rerank_enabled(monkeypatch):
     with (
         patch("workers.embed.ollama_embedder.OllamaEmbedder", return_value=fake_embedder),
         patch("workers.embed.pgvector_store.PgVectorStore", return_value=fake_store),
+        patch("workers.embed.pipeline.active_embed_model", return_value="bge-m3"),
         patch("workers.rerank.SentenceReranker", return_value=fake_reranker),
     ):
         result = server._retrieve("query", top_k=1)
 
-    fake_store.search.assert_called_once_with([0.1], top_k=20, embed_model="bge-m3")
+    fake_store.search.assert_called_once_with([0.1], top_k=20, book_id=None, embed_model="bge-m3")
     fake_reranker.rerank.assert_called_once_with("query", candidates, 1)
     assert result == reranked
 
@@ -194,7 +195,7 @@ def test_retrieve_hybrid_enabled(monkeypatch):
     ):
         result = server._retrieve("query", top_k=5)
 
-    fake_store.search_keyword.assert_called_once_with("query", top_k=5)
+    fake_store.search_keyword.assert_called_once_with("query", top_k=5, book_id=None)
     assert isinstance(result, list)
 
 
@@ -444,3 +445,139 @@ def test_retrieve_rerank_fallback_on_error(monkeypatch):
 
     # 例外が伝播せず、Rerank 前のベクター結果が返る
     assert result == vec_chunks
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Issue #7: HYBRID_ENABLED フォールバック時に warning ログを出力する
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def test_retrieve_hybrid_fallback_logs_warning(monkeypatch, caplog):
+    """search_keyword が例外を投げたとき logger.warning が出力される。"""
+    import logging
+
+    monkeypatch.setattr(config, "HYBRID_ENABLED", True)
+
+    fake_embedder = MagicMock()
+    fake_embedder.embed.return_value = [[0.1]]
+
+    vec_chunks = [_make_chunk("b", 0)]
+    fake_store = MagicMock()
+    fake_store.search.return_value = vec_chunks
+    fake_store.search_keyword.side_effect = RuntimeError("pg_bigm not installed")
+
+    with (
+        patch("workers.embed.ollama_embedder.OllamaEmbedder", return_value=fake_embedder),
+        patch("workers.embed.pgvector_store.PgVectorStore", return_value=fake_store),
+        caplog.at_level(logging.WARNING, logger="webui.server"),
+    ):
+        result = server._retrieve("query", top_k=5)
+
+    assert result == vec_chunks
+    assert any("HYBRID" in r.message for r in caplog.records)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Issue #8: VectorStore.search に book_id フィルタオプションを追加
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def test_pgvector_search_with_book_id_filter():
+    """book_id 指定時に WHERE 句でフィルタされることを SQL で確認する。"""
+    from unittest.mock import MagicMock, patch
+
+    from workers.embed.pgvector_store import PgVectorStore
+
+    mock_conn = MagicMock()
+    mock_cur = MagicMock()
+    mock_conn.cursor.return_value.__enter__.return_value = mock_cur
+    mock_cur.fetchall.return_value = []
+
+    with patch("workers.embed.pgvector_store.psycopg.connect", return_value=mock_conn):
+        store = PgVectorStore("dsn://fake")
+        store.search([0.1] * 1024, top_k=5, book_id="book1")
+
+    sql = mock_cur.execute.call_args[0][0]
+    assert "book_id" in sql
+
+
+def test_pgvector_search_without_book_id_filter():
+    """book_id 未指定時は WHERE book_id を含まない SQL が実行される。"""
+    from unittest.mock import MagicMock, patch
+
+    from workers.embed.pgvector_store import PgVectorStore
+
+    mock_conn = MagicMock()
+    mock_cur = MagicMock()
+    mock_conn.cursor.return_value.__enter__.return_value = mock_cur
+    mock_cur.fetchall.return_value = []
+
+    with patch("workers.embed.pgvector_store.psycopg.connect", return_value=mock_conn):
+        store = PgVectorStore("dsn://fake")
+        store.search([0.1] * 1024, top_k=5)
+
+    sql = mock_cur.execute.call_args[0][0]
+    # book_id フィルタなし → WHERE 句に book_id を含まない
+    assert "WHERE book_id" not in sql
+
+
+def test_pgvector_search_keyword_with_book_id_filter():
+    """search_keyword: book_id 指定時に WHERE book_id が SQL に含まれる。"""
+    from unittest.mock import MagicMock, patch
+
+    from workers.embed.pgvector_store import PgVectorStore
+
+    mock_conn = MagicMock()
+    mock_cur = MagicMock()
+    mock_conn.cursor.return_value.__enter__.return_value = mock_cur
+    mock_cur.fetchall.return_value = []
+
+    with patch("workers.embed.pgvector_store.psycopg.connect", return_value=mock_conn):
+        store = PgVectorStore("dsn://fake")
+        store.search_keyword("クエリ", top_k=5, book_id="book1")
+
+    sql = mock_cur.execute.call_args[0][0]
+    assert "book_id" in sql
+
+
+def test_pgvector_search_keyword_without_book_id_filter():
+    """search_keyword: book_id 未指定時は WHERE 句に book_id フィルタを含まない SQL。"""
+    from unittest.mock import MagicMock, patch
+
+    from workers.embed.pgvector_store import PgVectorStore
+
+    mock_conn = MagicMock()
+    mock_cur = MagicMock()
+    mock_conn.cursor.return_value.__enter__.return_value = mock_cur
+    mock_cur.fetchall.return_value = []
+
+    with patch("workers.embed.pgvector_store.psycopg.connect", return_value=mock_conn):
+        store = PgVectorStore("dsn://fake")
+        store.search_keyword("クエリ", top_k=5)
+
+    sql = mock_cur.execute.call_args[0][0]
+    assert "book_id = %(book_id)s" not in sql
+
+
+def test_retrieve_passes_book_id_to_store(monkeypatch):
+    """_retrieve(book_id=...) が store.search に book_id を伝播する。"""
+    monkeypatch.setattr(config, "RERANK_ENABLED", False)
+    monkeypatch.setattr(config, "HYBRID_ENABLED", False)
+    monkeypatch.setattr(config, "HYDE_ENABLED", False)
+
+    fake_embedder = MagicMock()
+    fake_embedder.embed.return_value = [[0.1]]
+
+    fake_store = MagicMock()
+    fake_store.search.return_value = [_make_chunk("b", 0)]
+
+    with (
+        patch("workers.embed.ollama_embedder.OllamaEmbedder", return_value=fake_embedder),
+        patch("workers.embed.pgvector_store.PgVectorStore", return_value=fake_store),
+        patch("workers.embed.pipeline.active_embed_model", return_value="bge-m3"),
+    ):
+        server._retrieve("query", top_k=3, book_id="mybook")
+
+    fake_store.search.assert_called_once_with(
+        [0.1], top_k=3, book_id="mybook", embed_model="bge-m3"
+    )

@@ -108,12 +108,13 @@ def _object_exists(bucket: str, key: str) -> bool:
         raise
 
 
-def _retrieve(query: str, top_k: int) -> list[dict]:
+def _retrieve(query: str, top_k: int, book_id: str | None = None) -> list[dict]:
     """クエリを埋め込み、pgvector から類似チャンクを取得する（同期・スレッドで実行）。
 
     HYDE_ENABLED   : 仮説回答を生成してからベクトル化する
     HYBRID_ENABLED : pg_bigm キーワード検索と RRF 融合する
     RERANK_ENABLED : CrossEncoder で再スコアリングして top_k に絞る
+    book_id        : 指定時はその書籍のチャンクのみを対象にする
     """
     from workers.embed.ollama_embedder import OllamaEmbedder
     from workers.embed.pgvector_store import PgVectorStore
@@ -131,11 +132,18 @@ def _retrieve(query: str, top_k: int) -> list[dict]:
     candidate_k = max(config.RERANK_CANDIDATE_K, top_k) if config.RERANK_ENABLED else top_k
     store = PgVectorStore(config.database_url())
     try:
-        chunks = store.search(vec, top_k=candidate_k, embed_model=active_embed_model())
+        chunks = store.search(
+            vec, top_k=candidate_k, book_id=book_id, embed_model=active_embed_model()
+        )
         if config.HYBRID_ENABLED:
-            with contextlib.suppress(Exception):
-                # pg_bigm 未インストール等で失敗した場合はベクター検索結果にフォールバック
-                chunks = _hybrid_rrf(query, chunks, store, candidate_k)
+            try:
+                chunks = _hybrid_rrf(query, chunks, store, candidate_k, book_id=book_id)
+            except Exception as e:
+                logger.warning(
+                    "HYBRID_ENABLED=true だがキーワード検索失敗（VEC検索にフォールバック）: %s",
+                    e,
+                    exc_info=True,
+                )
     finally:
         store.close()
 
@@ -172,9 +180,10 @@ def _hybrid_rrf(
     store,
     top_k: int,
     k: int = 60,
+    book_id: str | None = None,
 ) -> list[dict]:
     """ベクトル検索結果とキーワード検索結果を RRF で融合する（HYBRID_ENABLED 時）。"""
-    kw_chunks = store.search_keyword(query, top_k=top_k)
+    kw_chunks = store.search_keyword(query, top_k=top_k, book_id=book_id)
 
     scores: dict[str, float] = {}
     id_to_chunk: dict[str, dict] = {}
@@ -292,9 +301,13 @@ async def chat(request: Request) -> StreamingResponse:
     top_k: int = int(body.get("top_k", 5))
     persona: str = body.get("persona", "")
     lang: str = body.get("lang", "ja")
+    book_id_raw = body.get("book_id")
+    if book_id_raw is not None and not isinstance(book_id_raw, str):
+        return JSONResponse({"detail": "book_id は文字列である必要があります"}, status_code=400)
+    book_id: str | None = book_id_raw or None
 
     loop = asyncio.get_running_loop()
-    chunks = await loop.run_in_executor(None, _retrieve, query, top_k)
+    chunks = await loop.run_in_executor(None, _retrieve, query, top_k, book_id)
 
     if config.CITATION_ENABLED:
         context = "\n\n".join(

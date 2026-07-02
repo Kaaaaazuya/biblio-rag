@@ -25,15 +25,6 @@ ON CONFLICT (book_id, chunk_index) DO UPDATE SET
     embedding = EXCLUDED.embedding, embed_model = EXCLUDED.embed_model
 """
 
-_SEARCH_BASE = """
-SELECT book_id, chunk_index, title, author, chapter, section, page, text,
-       1 - (embedding <=> %(qv)s::vector) AS score
-FROM chunks
-{where_clause}
-ORDER BY embedding <=> %(qv)s::vector
-LIMIT %(k)s
-"""
-
 
 def _vec_literal(vec: Sequence[float]) -> str:
     return "[" + ",".join(str(float(x)) for x in vec) + "]"
@@ -49,23 +40,35 @@ class PgVectorStore(VectorStore):
                 cur.execute(_UPSERT, {**chunk, "embedding": _vec_literal(vec)})
 
     def search(
-        self, query_vector: list[float], top_k: int, embed_model: str | None = None
+        self,
+        query_vector: list[float],
+        top_k: int,
+        book_id: str | None = None,
+        embed_model: str | None = None,
     ) -> list[dict]:
-        """ベクトル検索。embed_model を指定した場合、同じモデルのベクトルのみを検索対象にする。"""
-        if embed_model:
-            where_clause = "WHERE embed_model = %(embed_model)s"
-            params = {
-                "qv": _vec_literal(query_vector),
-                "k": top_k,
-                "embed_model": embed_model,
-            }
-        else:
-            where_clause = ""
-            params = {"qv": _vec_literal(query_vector), "k": top_k}
+        """ベクトル検索。book_id と embed_model を指定して絞り込むことが可能。"""
+        conditions: list[str] = []
+        params: dict = {"qv": _vec_literal(query_vector), "k": top_k}
 
-        query = _SEARCH_BASE.format(where_clause=where_clause)
+        if book_id is not None:
+            conditions.append("book_id = %(book_id)s")
+            params["book_id"] = book_id
+
+        if embed_model is not None:
+            conditions.append("embed_model = %(embed_model)s")
+            params["embed_model"] = embed_model
+
+        where_clause = "WHERE " + " AND ".join(conditions) if conditions else ""
+        sql = f"""
+            SELECT book_id, chunk_index, title, author, chapter, section, page, text,
+                   1 - (embedding <=> %(qv)s::vector) AS score
+            FROM chunks
+            {where_clause}
+            ORDER BY embedding <=> %(qv)s::vector
+            LIMIT %(k)s
+        """
         with self.conn.transaction(), self.conn.cursor(row_factory=dict_row) as cur:
-            cur.execute(query, params)
+            cur.execute(sql, params)
             return cur.fetchall()
 
     def count_book(self, book_id: str) -> int:
@@ -80,21 +83,25 @@ class PgVectorStore(VectorStore):
             cur.execute("DELETE FROM chunks WHERE book_id = %s", (book_id,))
             return cur.rowcount
 
-    def search_keyword(self, query: str, top_k: int) -> list[dict]:
-        """pg_bigm 全文検索で query に関連するチャンクを返す（HYBRID_ENABLED 時）。"""
+    def search_keyword(self, query: str, top_k: int, book_id: str | None = None) -> list[dict]:
+        """pg_bigm 全文検索で query に関連するチャンクを返す（HYBRID_ENABLED 時）。
+        book_id でも絞り込み可能。
+        """
         escaped = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        book_cond = "book_id = %(book_id)s AND " if book_id is not None else ""
+        sql = f"""
+            SELECT book_id, chunk_index, title, author, chapter, section, page, text,
+                   bigm_similarity(text, %(q)s) AS score
+            FROM chunks
+            WHERE {book_cond}text LIKE %(pat)s ESCAPE '\\'
+            ORDER BY score DESC
+            LIMIT %(k)s
+        """
+        params: dict = {"q": query, "pat": f"%{escaped}%", "k": top_k}
+        if book_id is not None:
+            params["book_id"] = book_id
         with self.conn.transaction(), self.conn.cursor(row_factory=dict_row) as cur:
-            cur.execute(
-                """
-                SELECT book_id, chunk_index, title, author, chapter, section, page, text,
-                       bigm_similarity(text, %(q)s) AS score
-                FROM chunks
-                WHERE text LIKE %(pat)s ESCAPE '\\'
-                ORDER BY score DESC
-                LIMIT %(k)s
-                """,
-                {"q": query, "pat": f"%{escaped}%", "k": top_k},
-            )
+            cur.execute(sql, params)
             return cur.fetchall()
 
     def atomic_delete_and_upsert(
