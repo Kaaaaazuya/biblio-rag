@@ -21,6 +21,7 @@ from pathlib import Path
 from urllib.parse import quote
 
 import httpx
+from botocore.exceptions import ClientError
 from starlette.applications import Starlette
 from starlette.background import BackgroundTasks
 from starlette.requests import Request
@@ -32,6 +33,9 @@ from workers import config
 from workers.storage import RAW_PREFIX
 
 STATIC_DIR = Path(__file__).parent / "static"
+
+# アップロードサイズ上限: 500MB
+MAX_UPLOAD_SIZE = 500 * 1024 * 1024
 
 # 取り込みステータスのインメモリストア（プロセス再起動でリセット）
 _status: dict[str, dict] = {}
@@ -84,6 +88,20 @@ def _safe_name(name: str) -> str:
     if not base or base in {".", ".."}:
         raise ValueError("不正なファイル名です")
     return base
+
+
+def _object_exists(bucket: str, key: str) -> bool:
+    """S3 オブジェクトが存在するかチェック。存在すれば True、しなければ False。"""
+    try:
+        s3 = config.s3_client()
+        s3.head_object(Bucket=bucket, Key=key)
+        return True
+    except ClientError as e:
+        # 404 Not Found (NoSuchKey) なら存在しない
+        if e.response["Error"]["Code"] in ("404", "NoSuchKey"):
+            return False
+        # その他のエラーは再スロー（権限不足など）
+        raise
 
 
 def _retrieve(query: str, top_k: int) -> list[dict]:
@@ -206,17 +224,70 @@ _CITATION_INSTRUCTION = (
 )
 
 
+def _validate_chat_input(body: dict) -> tuple[str | None, int]:
+    """
+    /api/chat の入力を検証する。
+
+    Returns:
+        (error_message, status_code) の tuple。エラーがなければ (None, 200)。
+    """
+    # query の検証
+    query = (body.get("query") or "").strip()
+    if not query:
+        return ("query は必須です", 400)
+
+    # top_k の検証
+    try:
+        top_k = int(body.get("top_k", 5))
+        if top_k < 1 or top_k > 100:
+            return ("top_k は 1～100 の範囲で指定してください", 422)
+    except (ValueError, TypeError):
+        return ("top_k は整数である必要があります", 422)
+
+    # history の検証
+    history: list[dict] = body.get("history", [])
+    if not isinstance(history, list):
+        return ("history はリストである必要があります", 422)
+
+    for i, msg in enumerate(history):
+        if not isinstance(msg, dict):
+            return (f"history[{i}] は辞書である必要があります", 422)
+
+        # role の検証
+        if "role" not in msg:
+            return (f"history[{i}] に role が指定されていません", 422)
+
+        role = msg.get("role")
+        if role not in ("user", "assistant"):
+            return (
+                f'history[{i}] の role は "user" または "assistant" である必要があります',
+                422,
+            )
+
+        # content の検証
+        if "content" not in msg:
+            return (f"history[{i}] に content が指定されていません", 422)
+
+        if not msg.get("content"):
+            return (f"history[{i}] の content は空でない必要があります", 422)
+
+    return (None, 200)
+
+
 async def chat(request: Request) -> StreamingResponse:
     """RAG チャット: クエリ埋め込み → pgvector 検索 → Ollama 生成（SSE ストリーム）。"""
     body = await request.json()
+
+    # 入力検証
+    error_msg, status_code = _validate_chat_input(body)
+    if error_msg is not None:
+        return JSONResponse({"detail": error_msg}, status_code=status_code)
+
     query = (body.get("query") or "").strip()
     history: list[dict] = body.get("history", [])
     top_k: int = int(body.get("top_k", 5))
     persona: str = body.get("persona", "")
     lang: str = body.get("lang", "ja")
-
-    if not query:
-        return JSONResponse({"detail": "query は必須です"}, status_code=400)
 
     loop = asyncio.get_running_loop()
     chunks = await loop.run_in_executor(None, _retrieve, query, top_k)

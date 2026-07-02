@@ -240,3 +240,94 @@ def test_run_pipeline_sets_failed_on_error():
 
     assert server._status["fail-test"]["status"] == "failed"
     assert "接続失敗" in server._status["fail-test"]["error"]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# /api/chat 入力検証のテスト（Issue #14）
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def test_chat_rejects_top_k_exceeding_max(monkeypatch):
+    """top_k が上限（100）を超えた場合は 422 を返す。"""
+    res = _client.post("/api/chat", json={"query": "test", "top_k": 10000})
+    assert res.status_code == 422
+    assert "top_k" in res.json()["detail"]
+
+
+def test_chat_rejects_negative_top_k(monkeypatch):
+    """top_k が負数の場合は 422 を返す。"""
+    res = _client.post("/api/chat", json={"query": "test", "top_k": -5})
+    assert res.status_code == 422
+    assert "top_k" in res.json()["detail"]
+
+
+def test_chat_accepts_valid_top_k(monkeypatch):
+    """top_k が有効範囲（1～100）の場合は正常に処理される。"""
+    monkeypatch.setattr(server, "_retrieve", _fake_retrieve)
+    monkeypatch.setattr(
+        "httpx.AsyncClient",
+        _fake_llm([json.dumps({"done": True})]),
+    )
+
+    res = _client.post("/api/chat", json={"query": "test", "top_k": 50})
+    assert res.status_code == 200
+
+
+def test_chat_rejects_history_with_invalid_role(monkeypatch):
+    """history に無効なロール（"user"/"assistant" 以外）が含まれている場合は 422 を返す。"""
+    res = _client.post(
+        "/api/chat",
+        json={
+            "query": "test",
+            "history": [{"role": "system", "content": "invalid role"}],
+        },
+    )
+    assert res.status_code == 422
+    assert "role" in res.json()["detail"]
+
+
+def test_chat_rejects_history_without_role(monkeypatch):
+    """history のメッセージにロールが指定されていない場合は 422 を返す。"""
+    res = _client.post(
+        "/api/chat",
+        json={
+            "query": "test",
+            "history": [{"content": "no role"}],
+        },
+    )
+    assert res.status_code == 422
+    assert "role" in res.json()["detail"]
+
+
+def test_chat_accepts_valid_history_roles(monkeypatch):
+    """history に有効なロール（"user"/"assistant"）のみ含まれている場合は正常に処理される。"""
+    monkeypatch.setattr(server, "_retrieve", _fake_retrieve)
+    monkeypatch.setattr(
+        "httpx.AsyncClient",
+        _fake_llm([json.dumps({"done": True})]),
+    )
+
+    res = _client.post(
+        "/api/chat",
+        json={
+            "query": "test",
+            "history": [
+                {"role": "user", "content": "previous question"},
+                {"role": "assistant", "content": "previous answer"},
+            ],
+        },
+    )
+    assert res.status_code == 200
+
+
+def test_chat_rejects_empty_history_message(monkeypatch):
+    """history のメッセージが空または不正な場合は 422 を返す。"""
+    res = _client.post(
+        "/api/chat",
+        json={
+            "query": "test",
+            "history": [{"role": "user"}],  # content なし
+        },
+    )
+    assert res.status_code == 422
+    assert "content" in res.json()["detail"]
