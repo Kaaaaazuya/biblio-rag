@@ -126,3 +126,31 @@ def test_no_wildcard_bindings():
         for port_mapping in ports:
             assert not port_mapping.startswith("0.0.0.0:"), \
                 f"Service '{service_name}' binds to 0.0.0.0 - security issue! Got: {port_mapping}"
+
+
+def test_docker_images_have_pinned_versions():
+    """Test that all Docker images use pinned versions, not 'latest' (Issue #18).
+
+    Validates that each service specifies a concrete version tag or digest,
+    not 'latest', for reproducibility and security.
+    """
+    compose = load_docker_compose()
+    services = compose["services"]
+
+    for service_name, service in services.items():
+        if "image" not in service:
+            continue
+
+        image = service["image"]
+
+        # Check that 'latest' tag is not used
+        assert not image.endswith(":latest"), \
+            f"Service '{service_name}' uses ':latest' tag - must use pinned version. " \
+            f"Image: {image}"
+
+        # Check that image has a version tag or digest
+        # Valid formats: name:version (e.g., postgres:17.2) or name@sha256:...
+        has_version_or_digest = ":" in image or "@" in image
+        assert has_version_or_digest, \
+            f"Service '{service_name}' has no version or digest specified. " \
+            f"Image: {image}. Use format 'name:version' or 'name@sha256:digest'"
