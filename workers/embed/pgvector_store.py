@@ -100,7 +100,7 @@ class PgVectorStore(VectorStore):
         params: dict = {"q": query, "pat": f"%{escaped}%", "k": top_k}
         if book_id is not None:
             params["book_id"] = book_id
-        with self.conn.cursor(row_factory=dict_row) as cur:
+        with self.conn.transaction(), self.conn.cursor(row_factory=dict_row) as cur:
             cur.execute(sql, params)
             return cur.fetchall()
 
