@@ -32,10 +32,8 @@ from starlette.staticfiles import StaticFiles
 
 from workers import config
 from workers.storage import RAW_PREFIX, StatusStore
-from webui.logging_config import configure_logging
 
 logger = logging.getLogger(__name__)
-configure_logging()
 
 STATIC_DIR = Path(__file__).parent / "static"
 
