@@ -15,11 +15,13 @@ def _read_html(path: str) -> str:
 
 
 def test_chat_html_marked_has_integrity_or_local():
-    """chat.html の marked スクリプト は integrity 属性か、またはローカルパスからロードされている。"""
+    """chat.html の marked スクリプトが integrity 属性またはローカルパスを持つ。"""
     html = _read_html("webui/static/chat.html")
 
     # marked スクリプトタグを探す
-    marked_script_pattern = r'<script\s+([^>]*)\s*src\s*=\s*["\']([^"\']*marked[^"\']*)["\']([^>]*)>'
+    marked_script_pattern = (
+        r'<script\s+([^>]*)\s*src\s*=\s*["\']([^"\']*marked[^"\']*)["\']([^>]*)>'
+    )
     match = re.search(marked_script_pattern, html)
 
     assert match, "marked スクリプトタグが見つかりません"
@@ -41,13 +43,12 @@ def test_chat_html_marked_has_integrity_or_local():
 
     # integrity 属性があることを確認
     assert re.search(r'integrity\s*=\s*["\']sha384-[^"\']+["\']', full_tag), (
-        f"marked スクリプトに integrity 属性がありません。"
-        f"タグ全体: <script {full_tag}>"
+        f"marked スクリプトに integrity 属性がありません。タグ全体: <script {full_tag}>"
     )
 
     # crossorigin="anonymous" が設定されていることを確認
     assert re.search(r'crossorigin\s*=\s*["\']anonymous["\']', full_tag), (
-        f"marked スクリプトに crossorigin=\"anonymous\" が設定されていません。"
+        f'marked スクリプトに crossorigin="anonymous" が設定されていません。'
         f"タグ全体: <script {full_tag}>"
     )
 

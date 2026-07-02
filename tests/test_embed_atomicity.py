@@ -11,11 +11,10 @@ But NOT: old chunks deleted, but only some new chunks inserted.
 from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
-import pytest
 
+from workers.embed.base import Embedder, VectorStore
 from workers.embed.pgvector_store import PgVectorStore
 from workers.embed.pipeline import embed_and_store_atomic
-from workers.embed.base import Embedder, VectorStore
 
 
 class _FakeEmbedder(Embedder):
@@ -47,7 +46,9 @@ class _TransactionTrackingStore(VectorStore):
     def upsert(self, chunks: list[dict], vectors: list[list[float]]) -> None:
         self.operations.append({"op": "upsert", "chunks": chunks})
 
-    def search(self, query_vector: list[float], top_k: int, embed_model: str | None = None) -> list[dict]:
+    def search(
+        self, query_vector: list[float], top_k: int, embed_model: str | None = None
+    ) -> list[dict]:
         return []
 
     def atomic_delete_and_upsert(

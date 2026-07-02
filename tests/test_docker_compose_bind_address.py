@@ -4,8 +4,9 @@ Validates that development Docker services bind only to 127.0.0.1 (localhost),
 not to 0.0.0.0 (all interfaces), for security reasons.
 """
 
-import yaml
 from pathlib import Path
+
+import yaml
 
 
 def load_docker_compose():
@@ -35,11 +36,12 @@ def test_db_service_binds_to_localhost():
 
     # All port mappings should bind to 127.0.0.1 (not 0.0.0.0)
     for port_mapping in ports:
-        assert not port_mapping.startswith("5432:"), \
+        assert not port_mapping.startswith("5432:"), (
             "DB port 5432 should bind to 127.0.0.1, not default interface"
-        assert port_mapping.startswith("127.0.0.1:5432:") or \
-               port_mapping.startswith("localhost:5432:"), \
-            f"Expected db port to bind to 127.0.0.1 or localhost, got: {port_mapping}"
+        )
+        assert port_mapping.startswith("127.0.0.1:5432:") or port_mapping.startswith(
+            "localhost:5432:"
+        ), f"Expected db port to bind to 127.0.0.1 or localhost, got: {port_mapping}"
 
 
 def test_ollama_service_binds_to_localhost():
@@ -55,11 +57,12 @@ def test_ollama_service_binds_to_localhost():
 
     # All port mappings should bind to 127.0.0.1 (not 0.0.0.0)
     for port_mapping in ports:
-        assert not port_mapping.startswith("11434:"), \
+        assert not port_mapping.startswith("11434:"), (
             "Ollama port 11434 should bind to 127.0.0.1, not default interface"
-        assert port_mapping.startswith("127.0.0.1:11434:") or \
-               port_mapping.startswith("localhost:11434:"), \
-            f"Expected ollama port to bind to 127.0.0.1 or localhost, got: {port_mapping}"
+        )
+        assert port_mapping.startswith("127.0.0.1:11434:") or port_mapping.startswith(
+            "localhost:11434:"
+        ), f"Expected ollama port to bind to 127.0.0.1 or localhost, got: {port_mapping}"
 
 
 def test_minio_service_binds_to_localhost():
@@ -75,15 +78,16 @@ def test_minio_service_binds_to_localhost():
 
     # All port mappings should bind to 127.0.0.1 (not 0.0.0.0)
     for port_mapping in ports:
-        assert not port_mapping.startswith("9000:") and \
-               not port_mapping.startswith("9001:"), \
+        assert not port_mapping.startswith("9000:") and not port_mapping.startswith("9001:"), (
             f"MinIO ports should bind to 127.0.0.1, not default interface: {port_mapping}"
+        )
 
-        assert port_mapping.startswith("127.0.0.1:9000:") or \
-               port_mapping.startswith("127.0.0.1:9001:") or \
-               port_mapping.startswith("localhost:9000:") or \
-               port_mapping.startswith("localhost:9001:"), \
-            f"Expected minio port to bind to 127.0.0.1 or localhost, got: {port_mapping}"
+        assert (
+            port_mapping.startswith("127.0.0.1:9000:")
+            or port_mapping.startswith("127.0.0.1:9001:")
+            or port_mapping.startswith("localhost:9000:")
+            or port_mapping.startswith("localhost:9001:")
+        ), f"Expected minio port to bind to 127.0.0.1 or localhost, got: {port_mapping}"
 
 
 def test_localstack_service_binds_to_localhost():
@@ -99,11 +103,12 @@ def test_localstack_service_binds_to_localhost():
 
     # All port mappings should bind to 127.0.0.1 (not 0.0.0.0)
     for port_mapping in ports:
-        assert not port_mapping.startswith("4566:"), \
+        assert not port_mapping.startswith("4566:"), (
             "LocalStack port 4566 should bind to 127.0.0.1, not default interface"
-        assert port_mapping.startswith("127.0.0.1:4566:") or \
-               port_mapping.startswith("localhost:4566:"), \
-            f"Expected localstack port to bind to 127.0.0.1 or localhost, got: {port_mapping}"
+        )
+        assert port_mapping.startswith("127.0.0.1:4566:") or port_mapping.startswith(
+            "localhost:4566:"
+        ), f"Expected localstack port to bind to 127.0.0.1 or localhost, got: {port_mapping}"
 
 
 def test_no_wildcard_bindings():
@@ -124,8 +129,9 @@ def test_no_wildcard_bindings():
 
         ports = service["ports"]
         for port_mapping in ports:
-            assert not port_mapping.startswith("0.0.0.0:"), \
+            assert not port_mapping.startswith("0.0.0.0:"), (
                 f"Service '{service_name}' binds to 0.0.0.0 - security issue! Got: {port_mapping}"
+            )
 
 
 def test_docker_images_have_pinned_versions():
@@ -144,9 +150,9 @@ def test_docker_images_have_pinned_versions():
         image = service["image"]
 
         # Check that 'latest' tag is not used
-        assert not image.endswith(":latest"), \
-            f"Service '{service_name}' uses ':latest' tag - must use pinned version. " \
-            f"Image: {image}"
+        assert not image.endswith(":latest"), (
+            f"Service '{service_name}' uses ':latest' tag - must use pinned version. Image: {image}"
+        )
 
         # Check that image has a version tag or digest
         # Valid formats: name:version (e.g., postgres:17.2) or name@sha256:...
@@ -154,6 +160,7 @@ def test_docker_images_have_pinned_versions():
         # (e.g., registry:5000/image)
         last_part = image.split("/")[-1]
         has_version_or_digest = ":" in last_part or "@" in image
-        assert has_version_or_digest, \
-            f"Service '{service_name}' has no version or digest specified. " \
+        assert has_version_or_digest, (
+            f"Service '{service_name}' has no version or digest specified. "
             f"Image: {image}. Use format 'name:version' or 'name@sha256:digest'"
+        )

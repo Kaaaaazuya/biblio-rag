@@ -7,8 +7,9 @@
 - トリガー: push, pull_request
 """
 
-import yaml
 from pathlib import Path
+
+import yaml
 
 
 def test_ci_workflow_exists():
@@ -58,10 +59,9 @@ def test_ci_workflow_has_lint_job():
         workflow = yaml.safe_load(f)
 
     jobs = workflow["jobs"]
-    assert any(
-        "lint" in job_name.lower() or "check" in job_name.lower()
-        for job_name in jobs.keys()
-    ), "lint または check という名前のジョブが見つかりません"
+    assert any("lint" in job_name.lower() or "check" in job_name.lower() for job_name in jobs), (
+        "lint または check という名前のジョブが見つかりません"
+    )
 
 
 def test_ci_workflow_has_test_job():
@@ -71,10 +71,9 @@ def test_ci_workflow_has_test_job():
         workflow = yaml.safe_load(f)
 
     jobs = workflow["jobs"]
-    assert any(
-        "test" in job_name.lower()
-        for job_name in jobs.keys()
-    ), "test という名前のジョブが見つかりません"
+    assert any("test" in job_name.lower() for job_name in jobs), (
+        "test という名前のジョブが見つかりません"
+    )
 
 
 def test_ci_workflow_has_secret_scan_job():
@@ -85,8 +84,7 @@ def test_ci_workflow_has_secret_scan_job():
 
     jobs = workflow["jobs"]
     assert any(
-        "secret" in job_name.lower() or "gitleaks" in job_name.lower()
-        for job_name in jobs.keys()
+        "secret" in job_name.lower() or "gitleaks" in job_name.lower() for job_name in jobs
     ), "secret または gitleaks という名前のジョブが見つかりません"
 
 
@@ -109,10 +107,9 @@ def test_lint_job_runs_ruff_check():
     steps = lint_job.get("steps", [])
     has_ruff_check = False
     for step in steps:
-        if "run" in step:
-            if "ruff check" in step["run"]:
-                has_ruff_check = True
-                break
+        if "run" in step and "ruff check" in step["run"]:
+            has_ruff_check = True
+            break
 
     assert has_ruff_check, "lint ジョブが 'uv run ruff check' を実行していません"
 
@@ -136,10 +133,9 @@ def test_lint_job_runs_ruff_format_check():
     steps = lint_job.get("steps", [])
     has_ruff_format = False
     for step in steps:
-        if "run" in step:
-            if "ruff format" in step["run"] and "--check" in step["run"]:
-                has_ruff_format = True
-                break
+        if "run" in step and "ruff format" in step["run"] and "--check" in step["run"]:
+            has_ruff_format = True
+            break
 
     assert has_ruff_format, "lint ジョブが 'uv run ruff format --check' を実行していません"
 
@@ -163,10 +159,9 @@ def test_test_job_runs_pytest():
     steps = test_job.get("steps", [])
     has_pytest = False
     for step in steps:
-        if "run" in step:
-            if "pytest" in step["run"]:
-                has_pytest = True
-                break
+        if "run" in step and "pytest" in step["run"]:
+            has_pytest = True
+            break
 
     assert has_pytest, "test ジョブが 'pytest' を実行していません"
 
@@ -210,4 +205,6 @@ def test_workflow_runs_on_ubuntu_latest():
     jobs = workflow["jobs"]
     for name, job in jobs.items():
         if "runs-on" in job:
-            assert job["runs-on"] == "ubuntu-latest", f"ジョブ '{name}' が ubuntu-latest で実行されていません"
+            assert job["runs-on"] == "ubuntu-latest", (
+                f"ジョブ '{name}' が ubuntu-latest で実行されていません"
+            )

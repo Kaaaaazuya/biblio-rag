@@ -7,7 +7,7 @@ search() で指定されたモデルのベクトルのみが返される。
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -94,7 +94,6 @@ def test_search_with_no_embed_model_specified(store, mock_connection):
 
     mock_cursor.execute.assert_called_once()
     call_args = mock_cursor.execute.call_args
-    sql = call_args[0][0]
     params = call_args[0][1]
 
     # embed_model キーが params に含まれないことを確認（またはデフォルト値が使われる）

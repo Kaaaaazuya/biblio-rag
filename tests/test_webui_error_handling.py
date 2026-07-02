@@ -29,12 +29,14 @@ def test_save_meta_s3_error_returns_generic_message(caplog):
     mock_s3 = MagicMock()
     mock_s3.copy_object.side_effect = ConnectionError("connection to localhost:9000 refused")
 
-    with caplog.at_level(logging.ERROR):
-        with patch("workers.config.s3_client", return_value=mock_s3):
-            res = _client.post(
-                "/api/meta",
-                json={"book_id": "test", "title": "テスト書", "author": "著者"},
-            )
+    with (
+        caplog.at_level(logging.ERROR),
+        patch("workers.config.s3_client", return_value=mock_s3),
+    ):
+        res = _client.post(
+            "/api/meta",
+            json={"book_id": "test", "title": "テスト書", "author": "著者"},
+        )
 
     assert res.status_code == 503
     data = res.json()
@@ -122,9 +124,11 @@ def test_run_pipeline_error_logs_details_not_exposed_in_status(caplog):
     server._status.clear()
 
     error_detail = "connection to localhost:5432 refused"
-    with caplog.at_level(logging.ERROR):
-        with patch("workers.storage.ObjectStore", side_effect=ConnectionError(error_detail)):
-            server._run_pipeline("error-test")
+    with (
+        caplog.at_level(logging.ERROR),
+        patch("workers.storage.ObjectStore", side_effect=ConnectionError(error_detail)),
+    ):
+        server._run_pipeline("error-test")
 
     status = server._status["error-test"]
     assert status["status"] == "failed"

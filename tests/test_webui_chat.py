@@ -247,9 +247,11 @@ def test_run_pipeline_sets_failed_on_error(caplog):
 
     server._status.clear()
 
-    with caplog.at_level(logging.ERROR):
-        with patch("workers.storage.ObjectStore", side_effect=RuntimeError("接続失敗")):
-            server._run_pipeline("fail-test")
+    with (
+        caplog.at_level(logging.ERROR),
+        patch("workers.storage.ObjectStore", side_effect=RuntimeError("接続失敗")),
+    ):
+        server._run_pipeline("fail-test")
 
     assert server._status["fail-test"]["status"] == "failed"
     # 内部情報（接続失敗）はステータスに含めない
@@ -386,7 +388,9 @@ def test_chat_markdown_with_dangerous_tags(monkeypatch):
     dangerous_llm_output = [
         json.dumps({"message": {"content": "Normal text\n\n<script>"}, "done": False}),
         json.dumps({"message": {"content": "alert('XSS')</script>\n"}, "done": False}),
-        json.dumps({"message": {"content": "<iframe src='http://evil.com'></iframe>\n"}, "done": False}),
+        json.dumps(
+            {"message": {"content": "<iframe src='http://evil.com'></iframe>\n"}, "done": False}
+        ),
         json.dumps({"message": {"content": "More text"}, "done": False}),
         json.dumps({"done": True}),
     ]
