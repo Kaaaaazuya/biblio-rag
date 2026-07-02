@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import logging
 import re
 import threading
 from pathlib import Path
@@ -31,6 +32,8 @@ from starlette.staticfiles import StaticFiles
 
 from workers import config
 from workers.storage import RAW_PREFIX
+
+logger = logging.getLogger(__name__)
 
 STATIC_DIR = Path(__file__).parent / "static"
 
@@ -78,7 +81,8 @@ def _run_pipeline(book_id: str) -> None:
 
         _set_status(book_id, "done")
     except Exception as e:  # noqa: BLE001
-        _set_status(book_id, "failed", str(e))
+        logger.error(f"Pipeline failed for book_id={book_id}: {e}", exc_info=True)
+        _set_status(book_id, "failed", "An error occurred while processing. Please try again.")
 
 
 def _safe_name(name: str) -> str:
@@ -337,8 +341,13 @@ async def chat(request: Request) -> StreamingResponse:
                     except json.JSONDecodeError:
                         continue
                     if err := data.get("error"):
+                        logger.error(f"Ollama error: {err}")
                         msg = json.dumps(
-                            {"type": "error", "message": f"Ollama: {err}"}, ensure_ascii=False
+                            {
+                                "type": "error",
+                                "message": "An error occurred while generating a response. Please try again.",
+                            },
+                            ensure_ascii=False,
                         )
                         yield f"data: {msg}\n\n"
                         return
@@ -349,14 +358,24 @@ async def chat(request: Request) -> StreamingResponse:
                         yield f"data: {json.dumps({'type': 'done'})}\n\n"
                         return
         except Exception as e:  # noqa: BLE001
-            msg = json.dumps({"type": "error", "message": str(e)}, ensure_ascii=False)
+            logger.error(f"Chat error: {e}", exc_info=True)
+            msg = json.dumps(
+                {"type": "error", "message": "An error occurred. Please try again."},
+                ensure_ascii=False,
+            )
             yield f"data: {msg}\n\n"
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
 async def presign(request: Request) -> JSONResponse:
-    """raw/<filename> への PUT 用 presigned URL を発行する。"""
+    """raw/<filename> への PUT 用 presigned URL を発行する。
+
+    チェック項目:
+    - ファイル名の妥当性（パストラバーサル、PDF 拡張子）
+    - 既存オブジェクトの有無（上書き防止）
+    - Content-Length が上限以下か（500MB）
+    """
     body = await request.json()
     try:
         name = _safe_name(body.get("filename", ""))
@@ -365,7 +384,45 @@ async def presign(request: Request) -> JSONResponse:
     if not name.lower().endswith(".pdf"):
         return JSONResponse({"detail": "PDF ファイルのみ対応しています"}, status_code=400)
 
+    # Content-Length チェック
+    content_length = body.get("content_length")
+    if content_length is not None:
+        if content_length > MAX_UPLOAD_SIZE:
+            return JSONResponse(
+                {
+                    "detail": f"ファイルサイズが大きすぎます。上限は {MAX_UPLOAD_SIZE // (1024 * 1024)}MB です。"
+                },
+                status_code=413,
+            )
+
     key = f"{RAW_PREFIX}{name}"
+
+    # 既存オブジェクト確認（上書き防止）
+    try:
+        if _object_exists(config.S3_BUCKET, key):
+            return JSONResponse(
+                {
+                    "detail": "このファイル名のオブジェクトは既に存在します。別の名前でアップロードしてください。"
+                },
+                status_code=409,
+            )
+    except ClientError as e:
+        # S3 API エラー
+        logger.error(f"S3 error checking object existence for key={key}: {e}", exc_info=True)
+        return JSONResponse(
+            {"detail": "Failed to verify file availability. Please try again."},
+            status_code=503,
+        )
+    except Exception as e:  # noqa: BLE001
+        # その他のエラー
+        logger.error(
+            f"Unexpected error checking object existence for key={key}: {e}", exc_info=True
+        )
+        return JSONResponse(
+            {"detail": "An error occurred. Please try again."},
+            status_code=500,
+        )
+
     url = config.s3_client().generate_presigned_url(
         "put_object",
         Params={
@@ -383,12 +440,28 @@ async def save_meta(request: Request) -> JSONResponse:
 
     presigned URL でアップロード済みの raw PDF に copy_object で metadata を付与する。
     S3 object metadata は US-ASCII のみ → 日本語は URL エンコード済みで格納。
+
+    チェック項目:
+    - title/author の必須入力
+    - Content-Length が上限以下か（500MB）
     """
     body = await request.json()
     title = (body.get("title") or "").strip()
     author = (body.get("author") or "").strip()
     if not title or not author:
         return JSONResponse({"detail": "title と author は必須です"}, status_code=400)
+
+    # Content-Length チェック
+    content_length = body.get("content_length")
+    if content_length is not None:
+        if content_length > MAX_UPLOAD_SIZE:
+            return JSONResponse(
+                {
+                    "detail": f"ファイルサイズが大きすぎます。上限は {MAX_UPLOAD_SIZE // (1024 * 1024)}MB です。"
+                },
+                status_code=413,
+            )
+
     try:
         book_id = _safe_name(body.get("book_id", ""))
     except ValueError as e:
@@ -404,8 +477,28 @@ async def save_meta(request: Request) -> JSONResponse:
             Metadata={"title": quote(title), "author": quote(author)},
             MetadataDirective="REPLACE",
         )
+    except ClientError as e:
+        # S3 API エラー（ファイルが見つからないなど）
+        logger.error(f"S3 error for book_id={book_id}: {e}", exc_info=True)
+        status_code = e.response.get("ResponseMetadata", {}).get("HTTPStatusCode", 503)
+        return JSONResponse(
+            {"detail": "Failed to save metadata. Please try again."},
+            status_code=status_code,
+        )
+    except ConnectionError as e:
+        # S3 接続エラー
+        logger.error(f"S3 connection error for book_id={book_id}: {e}", exc_info=True)
+        return JSONResponse(
+            {"detail": "Failed to save metadata. Please try again."},
+            status_code=503,
+        )
     except Exception as e:  # noqa: BLE001
-        return JSONResponse({"detail": f"メタデータ保存失敗: {e}"}, status_code=500)
+        # その他のエラー
+        logger.error(f"Unexpected error saving metadata for book_id={book_id}: {e}", exc_info=True)
+        return JSONResponse(
+            {"detail": "An error occurred. Please try again."},
+            status_code=500,
+        )
     return JSONResponse({"book_id": book_id})
 
 

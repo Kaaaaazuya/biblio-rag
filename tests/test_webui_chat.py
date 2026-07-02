@@ -117,7 +117,8 @@ def test_retrieve_hyde_failure_falls_back_to_original_query(monkeypatch):
     fake_store.search.return_value = fake_results
 
     # HyDE を失敗させる
-    monkeypatch.setattr(server, "_hyde", side_effect=RuntimeError("HyDE service unavailable"))
+    fake_hyde = MagicMock(side_effect=RuntimeError("HyDE service unavailable"))
+    monkeypatch.setattr(server, "_hyde", fake_hyde)
     # HYDE_ENABLED を True に設定
     monkeypatch.setattr(server.config, "HYDE_ENABLED", True)
     monkeypatch.setattr(server.config, "HYBRID_ENABLED", False)
@@ -191,17 +192,25 @@ def test_chat_sse_done_event(monkeypatch):
     assert any(e["type"] == "done" for e in events)
 
 
-def test_chat_sse_ollama_error_event(monkeypatch):
+def test_chat_sse_ollama_error_event(monkeypatch, caplog):
+    """Ollama からのエラーは詳細情報を返さず、汎用メッセージを返す。"""
+    import logging
+
     monkeypatch.setattr(server, "_retrieve", _fake_retrieve)
     monkeypatch.setattr(
         "httpx.AsyncClient",
         _fake_llm([json.dumps({"error": "model not found"})]),
     )
 
-    events = _sse_events(_client.post("/api/chat", json={"query": "test"}).text)
+    with caplog.at_level(logging.ERROR):
+        events = _sse_events(_client.post("/api/chat", json={"query": "test"}).text)
     errors = [e for e in events if e["type"] == "error"]
     assert len(errors) == 1
-    assert "model not found" in errors[0]["message"]
+    # 内部情報（model not found）は返さない
+    assert "model not found" not in errors[0]["message"]
+    assert "An error occurred" in errors[0]["message"]
+    # ログには記録
+    assert any("model not found" in record.message for record in caplog.records)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -232,14 +241,22 @@ def test_run_pipeline_success():
     assert server._status["pipeline-test"]["status"] == "done"
 
 
-def test_run_pipeline_sets_failed_on_error():
+def test_run_pipeline_sets_failed_on_error(caplog):
+    """パイプラインエラーは詳細情報を返さず、汎用メッセージを返す。"""
+    import logging
+
     server._status.clear()
 
-    with patch("workers.storage.ObjectStore", side_effect=RuntimeError("接続失敗")):
-        server._run_pipeline("fail-test")
+    with caplog.at_level(logging.ERROR):
+        with patch("workers.storage.ObjectStore", side_effect=RuntimeError("接続失敗")):
+            server._run_pipeline("fail-test")
 
     assert server._status["fail-test"]["status"] == "failed"
-    assert "接続失敗" in server._status["fail-test"]["error"]
+    # 内部情報（接続失敗）はステータスに含めない
+    assert "接続失敗" not in server._status["fail-test"]["error"]
+    assert "An error occurred" in server._status["fail-test"]["error"]
+    # ログには記録
+    assert any("接続失敗" in record.message for record in caplog.records)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
