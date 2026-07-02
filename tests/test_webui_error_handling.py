@@ -68,7 +68,7 @@ def _sse_events(text: str) -> list[dict]:
 def test_chat_connection_error_returns_generic_message(caplog, monkeypatch):
     """Ollama 接続エラーが発生した場合、内部情報を含まないメッセージを返す。"""
 
-    def _fake_retrieve(query: str, top_k: int) -> list[dict]:
+    def _fake_retrieve(query: str, top_k: int, book_id: str | None = None) -> list[dict]:
         return [
             {
                 "book_id": "b",
