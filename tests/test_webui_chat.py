@@ -95,11 +95,12 @@ def test_retrieve_calls_embedder_and_store():
     with (
         patch("workers.embed.ollama_embedder.OllamaEmbedder", return_value=fake_embedder),
         patch("workers.embed.pgvector_store.PgVectorStore", return_value=fake_store),
+        patch("workers.embed.pipeline.active_embed_model", return_value="bge-m3"),
     ):
         result = server._retrieve("my query", 3)
 
     fake_embedder.embed.assert_called_once_with(["my query"])
-    fake_store.search.assert_called_once_with(fake_vec, top_k=3)
+    fake_store.search.assert_called_once_with(fake_vec, top_k=3, embed_model="bge-m3")
     fake_store.close.assert_called_once()
     assert result == fake_results
 
@@ -125,12 +126,13 @@ def test_retrieve_hyde_failure_falls_back_to_original_query(monkeypatch):
     with (
         patch("workers.embed.ollama_embedder.OllamaEmbedder", return_value=fake_embedder),
         patch("workers.embed.pgvector_store.PgVectorStore", return_value=fake_store),
+        patch("workers.embed.pipeline.active_embed_model", return_value="bge-m3"),
     ):
         result = server._retrieve("original query", 3)
 
     # 元のクエリで埋め込みが呼ばれるべき（HyDE の結果ではなく）
     fake_embedder.embed.assert_called_once_with(["original query"])
-    fake_store.search.assert_called_once_with(fake_vec, top_k=3)
+    fake_store.search.assert_called_once_with(fake_vec, top_k=3, embed_model="bge-m3")
     fake_store.close.assert_called_once()
     assert result == fake_results
 

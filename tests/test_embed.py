@@ -27,8 +27,11 @@ class FakeStore(VectorStore):
     def upsert(self, chunks, vectors):
         self.upserts.append((chunks, vectors))
 
-    def search(self, query_vector, top_k):
+    def search(self, query_vector, top_k, embed_model=None):
         return []
+
+    def atomic_delete_and_upsert(self, book_id, chunks, vectors):
+        self.upserts.append((chunks, vectors))
 
 
 def _records(n):

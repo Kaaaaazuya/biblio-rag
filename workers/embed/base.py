@@ -24,8 +24,26 @@ class VectorStore(ABC):
         ...
 
     @abstractmethod
-    def search(self, query_vector: list[float], top_k: int) -> list[dict]:
-        """クエリベクトルに近いチャンクを上位 top_k 件返す。"""
+    def search(
+        self, query_vector: list[float], top_k: int, embed_model: str | None = None
+    ) -> list[dict]:
+        """クエリベクトルに近いチャンクを上位 top_k 件返す。
+
+        embed_model を指定した場合、同じモデルのベクトルのみを検索対象にする。
+        異なる埋め込みモデルのベクトルが混在する場合に使用。
+        """
+        ...
+
+    @abstractmethod
+    def atomic_delete_and_upsert(
+        self, book_id: str, chunks: list[dict], vectors: list[list[float]]
+    ) -> None:
+        """Delete existing chunks and insert new ones in a single transaction.
+
+        Guarantees atomicity: either all old chunks are present (rollback),
+        or all new chunks are inserted (commit). Never leaves partial state.
+        Used during re-ingestion to prevent data inconsistency.
+        """
         ...
 
     def search_keyword(self, query: str, top_k: int) -> list[dict]:

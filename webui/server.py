@@ -95,6 +95,7 @@ def _retrieve(query: str, top_k: int) -> list[dict]:
     """
     from workers.embed.ollama_embedder import OllamaEmbedder
     from workers.embed.pgvector_store import PgVectorStore
+    from workers.embed.pipeline import active_embed_model
 
     search_query = query
     if config.HYDE_ENABLED:
@@ -108,7 +109,7 @@ def _retrieve(query: str, top_k: int) -> list[dict]:
     candidate_k = max(config.RERANK_CANDIDATE_K, top_k) if config.RERANK_ENABLED else top_k
     store = PgVectorStore(config.database_url())
     try:
-        chunks = store.search(vec, top_k=candidate_k)
+        chunks = store.search(vec, top_k=candidate_k, embed_model=active_embed_model())
         if config.HYBRID_ENABLED:
             with contextlib.suppress(Exception):
                 # pg_bigm 未インストール等で失敗した場合はベクター検索結果にフォールバック
