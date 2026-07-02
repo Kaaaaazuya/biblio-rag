@@ -67,7 +67,7 @@ class PgVectorStore(VectorStore):
             ORDER BY embedding <=> %(qv)s::vector
             LIMIT %(k)s
         """
-        with self.conn.cursor(row_factory=dict_row) as cur:
+        with self.conn.transaction(), self.conn.cursor(row_factory=dict_row) as cur:
             cur.execute(sql, params)
             return cur.fetchall()
 
