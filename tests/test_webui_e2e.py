@@ -105,3 +105,20 @@ def test_webui_upload_to_minio(page, server, tmp_path):
         with contextlib.suppress(Exception):
             config.s3_client().delete_object(Bucket=config.S3_BUCKET, Key=key)
         meta.unlink(missing_ok=True)
+
+
+def test_chat_ui_xss_sanitization_dompurify_loaded():
+    """chat.html に DOMPurify が正しく読み込まれていることを確認。
+
+    XSS 脆弱性対策: DOMPurify ライブラリが HTML に含まれていることを検証。
+    """
+    from pathlib import Path
+
+    html_file = Path(__file__).parent.parent / "webui" / "static" / "chat.html"
+    content = html_file.read_text()
+
+    # DOMPurify スクリプトタグが含まれていることを確認
+    assert "dompurify" in content.lower(), "DOMPurify が chat.html に読み込まれていない"
+    assert "purify.min.js" in content, "DOMPurify の最小化版が読み込まれていない"
+    # SRI（Subresource Integrity）が設定されていることを確認
+    assert "integrity=" in content, "DOMPurify に SRI が設定されていない"

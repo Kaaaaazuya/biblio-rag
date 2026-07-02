@@ -10,6 +10,7 @@ import sys
 
 from workers import config
 from workers.embed import OllamaEmbedder, PgVectorStore
+from workers.embed.pipeline import active_embed_model
 
 
 def _crumbs(rec: dict) -> str:
@@ -49,7 +50,7 @@ def _cli(argv: list[str]) -> int:
     store = PgVectorStore(config.database_url())
     try:
         query_vec = embedder.embed([query])[0]
-        results = store.search(query_vec, args.top_k)
+        results = store.search(query_vec, args.top_k, embed_model=active_embed_model())
     finally:
         store.close()
 

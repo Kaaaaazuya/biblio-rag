@@ -22,7 +22,7 @@ from workers import config
 from workers.chunk.chunk import chunk_markdown
 from workers.embed.ollama_embedder import OllamaEmbedder
 from workers.embed.pgvector_store import PgVectorStore
-from workers.embed.pipeline import embed_and_store
+from workers.embed.pipeline import active_embed_model, embed_and_store
 from workers.extract.extract import extract_pdf_to_markdown
 from workers.storage import ObjectStore
 
@@ -104,7 +104,7 @@ def test_pipeline_end_to_end(e2e_book):
 
     # ④ 検索: fixture 本文に近いクエリ → 先頭ヒットが当該書籍
     qv = embedder.embed(["段組みを含む紙面でブロック単位に座標で整列させ読み順を安定させる"])[0]
-    hits = store.search(qv, top_k=5)
+    hits = store.search(qv, top_k=5, embed_model=active_embed_model())
     assert hits, "検索結果が空"
     top = hits[0]
     assert top["book_id"] == book_id, f"先頭が別書籍: {top['book_id']}"

@@ -27,8 +27,11 @@ class FakeStore(VectorStore):
     def upsert(self, chunks, vectors):
         self.upserts.append((chunks, vectors))
 
-    def search(self, query_vector, top_k):
+    def search(self, query_vector, top_k, embed_model=None):
         return []
+
+    def atomic_delete_and_upsert(self, book_id, chunks, vectors):
+        self.upserts.append((chunks, vectors))
 
 
 def _records(n):
@@ -42,7 +45,9 @@ def test_embed_and_store_wires_texts_to_vectors():
     assert n == 3
     assert emb.calls == [["t0", "t1", "t2"]]  # text 列だけを渡す
     chunks, vectors = store.upserts[0]
-    assert chunks is recs and len(vectors) == 3  # チャンクとベクトルが対応
+    # embed_model が付与された新しい dict が渡される（元の recs とは別オブジェクト）
+    assert [{k: v for k, v in c.items() if k != "embed_model"} for c in chunks] == recs
+    assert len(vectors) == 3  # チャンクとベクトルが対応
 
 
 def test_embed_and_store_empty_skips_calls():

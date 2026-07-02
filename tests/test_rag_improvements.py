@@ -165,11 +165,12 @@ def test_retrieve_rerank_enabled(monkeypatch):
     with (
         patch("workers.embed.ollama_embedder.OllamaEmbedder", return_value=fake_embedder),
         patch("workers.embed.pgvector_store.PgVectorStore", return_value=fake_store),
+        patch("workers.embed.pipeline.active_embed_model", return_value="bge-m3"),
         patch("workers.rerank.SentenceReranker", return_value=fake_reranker),
     ):
         result = server._retrieve("query", top_k=1)
 
-    fake_store.search.assert_called_once_with([0.1], top_k=20, book_id=None)
+    fake_store.search.assert_called_once_with([0.1], top_k=20, book_id=None, embed_model="bge-m3")
     fake_reranker.rerank.assert_called_once_with("query", candidates, 1)
     assert result == reranked
 
@@ -573,7 +574,10 @@ def test_retrieve_passes_book_id_to_store(monkeypatch):
     with (
         patch("workers.embed.ollama_embedder.OllamaEmbedder", return_value=fake_embedder),
         patch("workers.embed.pgvector_store.PgVectorStore", return_value=fake_store),
+        patch("workers.embed.pipeline.active_embed_model", return_value="bge-m3"),
     ):
         server._retrieve("query", top_k=3, book_id="mybook")
 
-    fake_store.search.assert_called_once_with([0.1], top_k=3, book_id="mybook")
+    fake_store.search.assert_called_once_with(
+        [0.1], top_k=3, book_id="mybook", embed_model="bge-m3"
+    )

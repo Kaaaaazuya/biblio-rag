@@ -21,8 +21,15 @@ class _FakeStore(VectorStore):
     def upsert(self, chunks: list[dict], vectors: list[list[float]]) -> None:
         self.upserted.append((chunks, vectors))
 
-    def search(self, query_vector: list[float], top_k: int) -> list[dict]:
+    def search(
+        self, query_vector: list[float], top_k: int, embed_model: str | None = None
+    ) -> list[dict]:
         return []
+
+    def atomic_delete_and_upsert(
+        self, book_id: str, chunks: list[dict], vectors: list[list[float]]
+    ) -> None:
+        self.upserted.append((chunks, vectors))
 
 
 def test_make_embedder_default_returns_ollama(monkeypatch):
@@ -61,9 +68,24 @@ def test_embed_and_store_attaches_embed_model():
     assert stored[0]["embed_model"] == "bge-m3"
 
 
-def test_embed_and_store_no_model_omits_field():
+def test_embed_and_store_no_model_uses_active_embed_model(monkeypatch):
+    monkeypatch.setattr(config, "EMBED_BACKEND", "ollama")
+    monkeypatch.setattr(config, "EMBED_MODEL", "bge-m3-custom")
     recs = [{"book_id": "b", "chunk_index": 0, "text": "t"}]
     store = _FakeStore()
     embed_and_store(recs, _FakeEmbedder(), store)
     stored = store.upserted[0][0]
-    assert "embed_model" not in stored[0]
+    assert stored[0]["embed_model"] == "bge-m3-custom"
+
+
+def test_embed_and_store_atomic_delegates_to_store():
+    """Verify that embed_and_store_atomic uses the store's atomic method."""
+    from workers.embed.pipeline import embed_and_store_atomic
+
+    recs = [{"book_id": "book1", "chunk_index": 0, "text": "t"}]
+    store = _FakeStore()
+    n = embed_and_store_atomic("book1", recs, _FakeEmbedder(), store, embed_model="bge-m3")
+    assert n == 1
+    assert len(store.upserted) == 1
+    stored_chunks, stored_vectors = store.upserted[0]
+    assert stored_chunks[0]["embed_model"] == "bge-m3"

@@ -271,5 +271,5 @@ def test_retrieve_candidate_k_uses_max_of_rerank_k_and_top_k(monkeypatch):
 
     # top_k=5 が優先されるので search は 5 件を要求するはず
     mock_store.search.assert_called_once_with(
-        mock_embedder.embed.return_value[0], top_k=5, book_id=None
+        mock_embedder.embed.return_value[0], top_k=5, book_id=None, embed_model="bge-m3"
     )

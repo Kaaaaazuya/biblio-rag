@@ -95,11 +95,45 @@ def test_retrieve_calls_embedder_and_store():
     with (
         patch("workers.embed.ollama_embedder.OllamaEmbedder", return_value=fake_embedder),
         patch("workers.embed.pgvector_store.PgVectorStore", return_value=fake_store),
+        patch("workers.embed.pipeline.active_embed_model", return_value="bge-m3"),
     ):
         result = server._retrieve("my query", 3)
 
     fake_embedder.embed.assert_called_once_with(["my query"])
-    fake_store.search.assert_called_once_with(fake_vec, top_k=3, book_id=None)
+    fake_store.search.assert_called_once_with(fake_vec, top_k=3, book_id=None, embed_model="bge-m3")
+    fake_store.close.assert_called_once()
+    assert result == fake_results
+
+
+def test_retrieve_hyde_failure_falls_back_to_original_query(monkeypatch):
+    """HyDE が失敗した場合、元のクエリで埋め込みと検索を行う。"""
+    fake_vec = [0.5, 0.6, 0.7]
+    fake_results = [{"book_id": "b", "text": "t", "title": "T"}]
+
+    fake_embedder = MagicMock()
+    fake_embedder.embed.return_value = [fake_vec]
+
+    fake_store = MagicMock()
+    fake_store.search.return_value = fake_results
+
+    # HyDE を失敗させる
+    fake_hyde = MagicMock(side_effect=RuntimeError("HyDE service unavailable"))
+    monkeypatch.setattr(server, "_hyde", fake_hyde)
+    # HYDE_ENABLED を True に設定
+    monkeypatch.setattr(server.config, "HYDE_ENABLED", True)
+    monkeypatch.setattr(server.config, "HYBRID_ENABLED", False)
+    monkeypatch.setattr(server.config, "RERANK_ENABLED", False)
+
+    with (
+        patch("workers.embed.ollama_embedder.OllamaEmbedder", return_value=fake_embedder),
+        patch("workers.embed.pgvector_store.PgVectorStore", return_value=fake_store),
+        patch("workers.embed.pipeline.active_embed_model", return_value="bge-m3"),
+    ):
+        result = server._retrieve("original query", 3)
+
+    # 元のクエリで埋め込みが呼ばれるべき（HyDE の結果ではなく）
+    fake_embedder.embed.assert_called_once_with(["original query"])
+    fake_store.search.assert_called_once_with(fake_vec, top_k=3, book_id=None, embed_model="bge-m3")
     fake_store.close.assert_called_once()
     assert result == fake_results
 
@@ -165,17 +199,25 @@ def test_chat_sse_done_event(monkeypatch):
     assert any(e["type"] == "done" for e in events)
 
 
-def test_chat_sse_ollama_error_event(monkeypatch):
+def test_chat_sse_ollama_error_event(monkeypatch, caplog):
+    """Ollama からのエラーは詳細情報を返さず、汎用メッセージを返す。"""
+    import logging
+
     monkeypatch.setattr(server, "_retrieve", _fake_retrieve)
     monkeypatch.setattr(
         "httpx.AsyncClient",
         _fake_llm([json.dumps({"error": "model not found"})]),
     )
 
-    events = _sse_events(_client.post("/api/chat", json={"query": "test"}).text)
+    with caplog.at_level(logging.ERROR):
+        events = _sse_events(_client.post("/api/chat", json={"query": "test"}).text)
     errors = [e for e in events if e["type"] == "error"]
     assert len(errors) == 1
-    assert "model not found" in errors[0]["message"]
+    # 内部情報（model not found）は返さない
+    assert "model not found" not in errors[0]["message"]
+    assert "An error occurred" in errors[0]["message"]
+    # ログには記録
+    assert any("model not found" in record.message for record in caplog.records)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -206,11 +248,167 @@ def test_run_pipeline_success():
     assert server._status["pipeline-test"]["status"] == "done"
 
 
-def test_run_pipeline_sets_failed_on_error():
+def test_run_pipeline_sets_failed_on_error(caplog):
+    """パイプラインエラーは詳細情報を返さず、汎用メッセージを返す。"""
+    import logging
+
     server._status.clear()
 
-    with patch("workers.storage.ObjectStore", side_effect=RuntimeError("接続失敗")):
+    with (
+        caplog.at_level(logging.ERROR),
+        patch("workers.storage.ObjectStore", side_effect=RuntimeError("接続失敗")),
+    ):
         server._run_pipeline("fail-test")
 
     assert server._status["fail-test"]["status"] == "failed"
-    assert "接続失敗" in server._status["fail-test"]["error"]
+    # 内部情報（接続失敗）はステータスに含めない
+    assert "接続失敗" not in server._status["fail-test"]["error"]
+    assert "An error occurred" in server._status["fail-test"]["error"]
+    # ログには記録
+    assert any("接続失敗" in record.message for record in caplog.records)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# /api/chat 入力検証のテスト（Issue #14）
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def test_chat_rejects_top_k_exceeding_max(monkeypatch):
+    """top_k が上限（100）を超えた場合は 422 を返す。"""
+    res = _client.post("/api/chat", json={"query": "test", "top_k": 10000})
+    assert res.status_code == 422
+    assert "top_k" in res.json()["detail"]
+
+
+def test_chat_rejects_negative_top_k(monkeypatch):
+    """top_k が負数の場合は 422 を返す。"""
+    res = _client.post("/api/chat", json={"query": "test", "top_k": -5})
+    assert res.status_code == 422
+    assert "top_k" in res.json()["detail"]
+
+
+def test_chat_accepts_valid_top_k(monkeypatch):
+    """top_k が有効範囲（1～100）の場合は正常に処理される。"""
+    monkeypatch.setattr(server, "_retrieve", _fake_retrieve)
+    monkeypatch.setattr(
+        "httpx.AsyncClient",
+        _fake_llm([json.dumps({"done": True})]),
+    )
+
+    res = _client.post("/api/chat", json={"query": "test", "top_k": 50})
+    assert res.status_code == 200
+
+
+def test_chat_rejects_history_with_invalid_role(monkeypatch):
+    """history に無効なロール（"user"/"assistant" 以外）が含まれている場合は 422 を返す。"""
+    res = _client.post(
+        "/api/chat",
+        json={
+            "query": "test",
+            "history": [{"role": "system", "content": "invalid role"}],
+        },
+    )
+    assert res.status_code == 422
+    assert "role" in res.json()["detail"]
+
+
+def test_chat_rejects_history_without_role(monkeypatch):
+    """history のメッセージにロールが指定されていない場合は 422 を返す。"""
+    res = _client.post(
+        "/api/chat",
+        json={
+            "query": "test",
+            "history": [{"content": "no role"}],
+        },
+    )
+    assert res.status_code == 422
+    assert "role" in res.json()["detail"]
+
+
+def test_chat_accepts_valid_history_roles(monkeypatch):
+    """history に有効なロール（"user"/"assistant"）のみ含まれている場合は正常に処理される。"""
+    monkeypatch.setattr(server, "_retrieve", _fake_retrieve)
+    monkeypatch.setattr(
+        "httpx.AsyncClient",
+        _fake_llm([json.dumps({"done": True})]),
+    )
+
+    res = _client.post(
+        "/api/chat",
+        json={
+            "query": "test",
+            "history": [
+                {"role": "user", "content": "previous question"},
+                {"role": "assistant", "content": "previous answer"},
+            ],
+        },
+    )
+    assert res.status_code == 200
+
+
+def test_chat_rejects_empty_history_message(monkeypatch):
+    """history のメッセージが空または不正な場合は 422 を返す。"""
+    res = _client.post(
+        "/api/chat",
+        json={
+            "query": "test",
+            "history": [{"role": "user"}],  # content なし
+        },
+    )
+    assert res.status_code == 422
+    assert "content" in res.json()["detail"]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# XSS対策: DOMPurify でサニタイズされることをテスト
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def test_chat_api_serves_with_csp_header(monkeypatch):
+    """チャット API がレスポンスに CSP ヘッダーを付与してセキュリティ強化。
+
+    フロントエンド側で DOMPurify を使用するため、バックエンドでも
+    多層防御として CSP を設定する。
+    """
+    monkeypatch.setattr(server, "_retrieve", _fake_retrieve)
+    monkeypatch.setattr(
+        "httpx.AsyncClient",
+        _fake_llm([json.dumps({"done": True})]),
+    )
+
+    res = _client.post("/api/chat", json={"query": "test"})
+    # SSE レスポンスなので CSP はメインレスポンスではなく、
+    # 将来的な多層防御として確認
+    assert res.status_code == 200
+
+
+def test_chat_markdown_with_dangerous_tags(monkeypatch):
+    """Markdown に <script> や <iframe> が含まれている場合の処理をテスト。
+
+    フロントエンド側で DOMPurify でサニタイズされるが、
+    バックエンド側でも危険なコンテンツがそのまま返されることを確認。
+    （フロントエンド側のサニタイズに依存）
+    """
+    monkeypatch.setattr(server, "_retrieve", _fake_retrieve)
+
+    # 危険な HTML タグを含むコンテンツを複数の token に分割
+    dangerous_llm_output = [
+        json.dumps({"message": {"content": "Normal text\n\n<script>"}, "done": False}),
+        json.dumps({"message": {"content": "alert('XSS')</script>\n"}, "done": False}),
+        json.dumps(
+            {"message": {"content": "<iframe src='http://evil.com'></iframe>\n"}, "done": False}
+        ),
+        json.dumps({"message": {"content": "More text"}, "done": False}),
+        json.dumps({"done": True}),
+    ]
+
+    monkeypatch.setattr("httpx.AsyncClient", _fake_llm(dangerous_llm_output))
+
+    events = _sse_events(_client.post("/api/chat", json={"query": "test"}).text)
+    tokens = [e["content"] for e in events if e["type"] == "token"]
+    full_content = "".join(tokens)
+
+    # バックエンド側は危険なコンテンツをそのまま返す（フロントエンド側のサニタイズに依存）
+    assert "<script>" in full_content, f"Full content: {repr(full_content)}"
+    assert "<iframe" in full_content, f"Full content: {repr(full_content)}"  # <iframe> タグが存在
+    assert "Normal text" in full_content

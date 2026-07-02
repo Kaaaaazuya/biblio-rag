@@ -32,46 +32,61 @@ def _vec_literal(vec: Sequence[float]) -> str:
 
 class PgVectorStore(VectorStore):
     def __init__(self, dsn: str):
-        self.conn = psycopg.connect(dsn, autocommit=True)
+        self.conn = psycopg.connect(dsn, autocommit=False)
 
     def upsert(self, chunks: list[dict], vectors: list[list[float]]) -> None:
-        with self.conn.cursor() as cur:
+        with self.conn.transaction(), self.conn.cursor() as cur:
             for chunk, vec in zip(chunks, vectors, strict=True):
                 cur.execute(_UPSERT, {**chunk, "embedding": _vec_literal(vec)})
 
     def search(
-        self, query_vector: list[float], top_k: int, book_id: str | None = None
+        self,
+        query_vector: list[float],
+        top_k: int,
+        book_id: str | None = None,
+        embed_model: str | None = None,
     ) -> list[dict]:
-        book_cond = "WHERE book_id = %(book_id)s" if book_id is not None else ""
+        """ベクトル検索。book_id と embed_model を指定して絞り込むことが可能。"""
+        conditions: list[str] = []
+        params: dict = {"qv": _vec_literal(query_vector), "k": top_k}
+
+        if book_id is not None:
+            conditions.append("book_id = %(book_id)s")
+            params["book_id"] = book_id
+
+        if embed_model is not None:
+            conditions.append("embed_model = %(embed_model)s")
+            params["embed_model"] = embed_model
+
+        where_clause = "WHERE " + " AND ".join(conditions) if conditions else ""
         sql = f"""
             SELECT book_id, chunk_index, title, author, chapter, section, page, text,
                    1 - (embedding <=> %(qv)s::vector) AS score
             FROM chunks
-            {book_cond}
+            {where_clause}
             ORDER BY embedding <=> %(qv)s::vector
             LIMIT %(k)s
         """
-        params: dict = {"qv": _vec_literal(query_vector), "k": top_k}
-        if book_id is not None:
-            params["book_id"] = book_id
         with self.conn.cursor(row_factory=dict_row) as cur:
             cur.execute(sql, params)
             return cur.fetchall()
 
     def count_book(self, book_id: str) -> int:
         """その書籍が既に格納されているか（チャンク行数）。増分判定に使う。"""
-        with self.conn.cursor() as cur:
+        with self.conn.transaction(), self.conn.cursor() as cur:
             cur.execute("SELECT count(*) FROM chunks WHERE book_id = %s", (book_id,))
             return cur.fetchone()[0]
 
     def delete_book(self, book_id: str) -> int:
         """その書籍のチャンクを全削除（洗い替え/再投入前のクリーンアップ）。"""
-        with self.conn.cursor() as cur:
+        with self.conn.transaction(), self.conn.cursor() as cur:
             cur.execute("DELETE FROM chunks WHERE book_id = %s", (book_id,))
             return cur.rowcount
 
     def search_keyword(self, query: str, top_k: int, book_id: str | None = None) -> list[dict]:
-        """pg_bigm 全文検索で query に関連するチャンクを返す（HYBRID_ENABLED 時）。"""
+        """pg_bigm 全文検索で query に関連するチャンクを返す（HYBRID_ENABLED 時）。
+        book_id でも絞り込み可能。
+        """
         escaped = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
         book_cond = "book_id = %(book_id)s AND " if book_id is not None else ""
         sql = f"""
@@ -88,6 +103,21 @@ class PgVectorStore(VectorStore):
         with self.conn.cursor(row_factory=dict_row) as cur:
             cur.execute(sql, params)
             return cur.fetchall()
+
+    def atomic_delete_and_upsert(
+        self, book_id: str, chunks: list[dict], vectors: list[list[float]]
+    ) -> None:
+        """Delete existing chunks and insert new ones in a single transaction.
+
+        Guarantees atomicity: either all old chunks are present (rollback),
+        or all new chunks are inserted (commit). Never leaves partial state.
+        """
+        with self.conn.transaction(), self.conn.cursor() as cur:
+            # Delete all existing chunks for this book
+            cur.execute("DELETE FROM chunks WHERE book_id = %s", (book_id,))
+            # Insert all new chunks
+            for chunk, vec in zip(chunks, vectors, strict=True):
+                cur.execute(_UPSERT, {**chunk, "embedding": _vec_literal(vec)})
 
     def close(self) -> None:
         self.conn.close()
