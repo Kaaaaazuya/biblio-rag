@@ -48,9 +48,10 @@ _status_store: StatusStore | None = None
 
 
 def _get_status_store() -> StatusStore:
-    """Get status store instance. Returns the mocked instance if set in tests, otherwise a new instance.
+    """Get status store instance.
 
-    Returns a new instance per call to ensure thread-safety with psycopg connections.
+    Returns the mocked instance if set in tests, otherwise creates a new
+    instance per call to ensure thread-safety with psycopg connections.
     Tests can set _status_store to a mock for testing without DB.
     """
     global _status_store
@@ -551,11 +552,16 @@ def ingest_status(request: Request) -> JSONResponse:
             status_record = store.get_current_status(book_id)
             if status_record:
                 updated_at = status_record.get("updated_at")
+                updated_at_str = (
+                    updated_at.isoformat()
+                    if isinstance(updated_at, datetime)
+                    else updated_at
+                )
                 return JSONResponse({
                     "status": status_record.get("status", "unknown"),
                     "chunks_processed": status_record.get("chunks_processed", 0),
                     "error": status_record.get("error_msg"),
-                    "updated_at": updated_at.isoformat() if isinstance(updated_at, datetime) else updated_at,
+                    "updated_at": updated_at_str,
                 })
             else:
                 return JSONResponse({
@@ -584,15 +590,21 @@ def ingest_status_history(request: Request) -> JSONResponse:
             history = store.get_status_history(book_id)
             if not history:
                 return JSONResponse([])
-            formatted_history = [
-                {
+
+            def format_record(record):
+                created_at = record.get("created_at")
+                return {
                     "status": record.get("status"),
                     "chunks_processed": record.get("chunks_processed", 0),
                     "error": record.get("error_msg"),
-                    "created_at": record.get("created_at").isoformat() if isinstance(record.get("created_at"), datetime) else record.get("created_at"),
+                    "created_at": (
+                        created_at.isoformat()
+                        if isinstance(created_at, datetime)
+                        else created_at
+                    ),
                 }
-                for record in history
-            ]
+
+            formatted_history = [format_record(record) for record in history]
             return JSONResponse(formatted_history)
         finally:
             if store is not _status_store:
