@@ -8,8 +8,7 @@ CREATE TABLE IF NOT EXISTS ingestion_status (
     chunks_processed INTEGER        DEFAULT 0,
     error_msg    TEXT,
     created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
-    UNIQUE (book_id, status, created_at)  -- Allow historical tracking
+    updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 -- Index for fast lookup by book_id and most recent status

@@ -15,34 +15,40 @@ class TestStructuredLogging:
     """Tests for structured logging with JSON output."""
 
     def test_structured_logging_format_json(self):
-        """Test that logs are emitted as JSON with timestamp, level, message, and context."""
-        # Create a string buffer to capture logs
-        log_stream = StringIO()
-        handler = logging.StreamHandler(log_stream)
+        """Test that application's logger is configured with JSON formatter."""
+        from webui.logging_config import JSONFormatter
 
-        # Get or create a logger for testing
-        test_logger = logging.getLogger("test_structured")
-        test_logger.handlers = []  # Clear any existing handlers
-        test_logger.addHandler(handler)
-        test_logger.setLevel(logging.INFO)
+        # Get the application's root logger
+        root_logger = logging.getLogger()
 
-        # Set up a JSON formatter (this should be used in the actual implementation)
-        formatter = logging.Formatter(
-            '{"timestamp": "%(asctime)s", "level": "%(levelname)s", "message": "%(message)s", "logger": "%(name)s"}'
+        # Verify at least one handler exists
+        assert len(root_logger.handlers) > 0, "Root logger has no handlers configured"
+
+        # Verify at least one handler uses JSONFormatter
+        has_json_formatter = any(
+            isinstance(handler.formatter, JSONFormatter)
+            for handler in root_logger.handlers
         )
-        handler.setFormatter(formatter)
+        assert has_json_formatter, "Root logger has no JSONFormatter handler"
+
+        # Test actual JSON output by logging through the application logger
+        log_stream = StringIO()
+        test_handler = logging.StreamHandler(log_stream)
+        from webui.logging_config import JSONFormatter as TestJSONFormatter
+        test_handler.setFormatter(TestJSONFormatter())
+
+        app_logger = logging.getLogger("webui.server")
+        app_logger.handlers = [test_handler]
+        app_logger.setLevel(logging.INFO)
 
         # Log a test message
-        test_logger.info("Test message with context")
+        app_logger.info("Test message from application")
 
-        # Get the log output
+        # Get the log output and verify it's valid JSON
         log_output = log_stream.getvalue().strip()
-
-        # Verify it's valid JSON
         log_data = json.loads(log_output)
         assert log_data["level"] == "INFO"
-        assert log_data["message"] == "Test message with context"
-        assert log_data["logger"] == "test_structured"
+        assert log_data["message"] == "Test message from application"
         assert "timestamp" in log_data
 
     def test_structured_logging_includes_context(self):

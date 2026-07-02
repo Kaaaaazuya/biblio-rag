@@ -32,8 +32,10 @@ from starlette.staticfiles import StaticFiles
 
 from workers import config
 from workers.storage import RAW_PREFIX, StatusStore
+from webui.logging_config import configure_logging
 
 logger = logging.getLogger(__name__)
+configure_logging()
 
 STATIC_DIR = Path(__file__).parent / "static"
 
@@ -548,11 +550,12 @@ def ingest_status(request: Request) -> JSONResponse:
         try:
             status_record = store.get_current_status(book_id)
             if status_record:
+                updated_at = status_record.get("updated_at")
                 return JSONResponse({
                     "status": status_record.get("status", "unknown"),
                     "chunks_processed": status_record.get("chunks_processed", 0),
                     "error": status_record.get("error_msg"),
-                    "updated_at": status_record.get("updated_at"),
+                    "updated_at": updated_at.isoformat() if isinstance(updated_at, datetime) else updated_at,
                 })
             else:
                 return JSONResponse({
@@ -586,7 +589,7 @@ def ingest_status_history(request: Request) -> JSONResponse:
                     "status": record.get("status"),
                     "chunks_processed": record.get("chunks_processed", 0),
                     "error": record.get("error_msg"),
-                    "created_at": record.get("created_at"),
+                    "created_at": record.get("created_at").isoformat() if isinstance(record.get("created_at"), datetime) else record.get("created_at"),
                 }
                 for record in history
             ]
