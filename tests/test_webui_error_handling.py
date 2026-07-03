@@ -55,6 +55,76 @@ def test_save_meta_invalid_filename_returns_400():
     assert res.status_code == 400
 
 
+def test_save_meta_malformed_json_returns_400():
+    """不正な JSON ボディを送ると 500 ではなく 400 を返す（Issue #37 と同パターン）。"""
+    res = _client.post(
+        "/api/meta",
+        content=b"{invalid json",
+        headers={"Content-Type": "application/json"},
+    )
+    assert res.status_code == 400
+
+
+def test_save_meta_non_dict_json_returns_400():
+    """JSON として妥当でも辞書型でないボディ（例: null）を送ると 400 を返す。"""
+    res = _client.post(
+        "/api/meta",
+        content=b"null",
+        headers={"Content-Type": "application/json"},
+    )
+    assert res.status_code == 400
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# presign() エンドポイントのエラーハンドリング
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def test_presign_malformed_json_returns_400():
+    """不正な JSON ボディを送ると 500 ではなく 400 を返す（Issue #37 と同パターン）。"""
+    res = _client.post(
+        "/api/presign",
+        content=b"{invalid json",
+        headers={"Content-Type": "application/json"},
+    )
+    assert res.status_code == 400
+
+
+def test_presign_non_dict_json_returns_400():
+    """JSON として妥当でも辞書型でないボディ（例: [1,2,3]）を送ると 400 を返す。"""
+    res = _client.post(
+        "/api/presign",
+        content=b"[1,2,3]",
+        headers={"Content-Type": "application/json"},
+    )
+    assert res.status_code == 400
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ingest() エンドポイントのエラーハンドリング
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def test_ingest_malformed_json_returns_400():
+    """不正な JSON ボディを送ると 500 ではなく 400 を返す（Issue #37 と同パターン）。"""
+    res = _client.post(
+        "/api/ingest",
+        content=b"{invalid json",
+        headers={"Content-Type": "application/json"},
+    )
+    assert res.status_code == 400
+
+
+def test_ingest_non_dict_json_returns_400():
+    """JSON として妥当でも辞書型でないボディ（例: "text"）を送ると 400 を返す。"""
+    res = _client.post(
+        "/api/ingest",
+        content=b'"text"',
+        headers={"Content-Type": "application/json"},
+    )
+    assert res.status_code == 400
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # chat() エンドポイントのエラーハンドリング
 # ─────────────────────────────────────────────────────────────────────────────

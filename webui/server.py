@@ -467,6 +467,21 @@ async def chat(request: Request) -> StreamingResponse | JSONResponse:
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
+async def _parse_json_body(request: Request) -> tuple[dict, None] | tuple[None, JSONResponse]:
+    """リクエストボディを JSON dict としてパースする。
+
+    不正な JSON、または JSON として妥当でも dict でないボディ（null・配列・文字列など）は
+    400 エラーレスポンスとして返す。
+    """
+    try:
+        body = await request.json()
+    except ValueError:
+        return None, JSONResponse({"detail": "不正な JSON ボディです"}, status_code=400)
+    if not isinstance(body, dict):
+        return None, JSONResponse({"detail": "不正な JSON ボディです"}, status_code=400)
+    return body, None
+
+
 async def presign(request: Request) -> JSONResponse:
     """raw/<filename> への PUT 用 presigned URL を発行する。
 
@@ -475,7 +490,9 @@ async def presign(request: Request) -> JSONResponse:
     - 既存オブジェクトの有無（上書き防止）
     - Content-Length が上限以下か（500MB）
     """
-    body = await request.json()
+    body, error_response = await _parse_json_body(request)
+    if error_response is not None:
+        return error_response
     try:
         name = _safe_name(body.get("filename", ""))
     except ValueError as e:
@@ -540,7 +557,9 @@ async def save_meta(request: Request) -> JSONResponse:
     - title/author の必須入力
     - Content-Length が上限以下か（500MB）
     """
-    body = await request.json()
+    body, error_response = await _parse_json_body(request)
+    if error_response is not None:
+        return error_response
     title = (body.get("title") or "").strip()
     author = (body.get("author") or "").strip()
     if not title or not author:
@@ -597,7 +616,9 @@ async def save_meta(request: Request) -> JSONResponse:
 
 async def ingest(request: Request) -> JSONResponse:
     """取り込みパイプライン（extract→chunk→embed）をバックグラウンドで起動する。"""
-    body = await request.json()
+    body, error_response = await _parse_json_body(request)
+    if error_response is not None:
+        return error_response
     try:
         book_id = _safe_name(body.get("book_id", ""))
     except ValueError as e:
