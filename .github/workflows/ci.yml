@@ -9,10 +9,18 @@ on:
     branches:
       - main
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
 jobs:
   lint:
     name: Lint
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
 
@@ -20,6 +28,8 @@ jobs:
         uses: astral-sh/setup-uv@v2
         with:
           python-version-file: .python-version
+          enable-cache: true
+          cache-dependency-glob: uv.lock
 
       - name: Sync dependencies
         run: uv sync
@@ -33,6 +43,7 @@ jobs:
   test:
     name: Test
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     services:
       postgres:
         image: pgvector/pgvector:pg16
@@ -55,12 +66,14 @@ jobs:
         uses: astral-sh/setup-uv@v2
         with:
           python-version-file: .python-version
+          enable-cache: true
+          cache-dependency-glob: uv.lock
 
       - name: Sync dependencies
         run: uv sync
 
       - name: Run pytest
-        run: uv run pytest
+        run: uv run pytest --cov=workers --cov=webui --cov-report=term-missing
         env:
           POSTGRES_HOST: localhost
           POSTGRES_USER: postgres
@@ -70,6 +83,7 @@ jobs:
   secret-scan:
     name: Secret Scanning
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
         with:
