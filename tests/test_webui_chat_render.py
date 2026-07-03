@@ -31,21 +31,32 @@ def server():
     port = _free_port()
     base = f"http://127.0.0.1:{port}"
     proc = subprocess.Popen(
-        [sys.executable, "-m", "uvicorn", "webui.server:app", "--port", str(port)],
+        [
+            sys.executable,
+            "-m",
+            "uvicorn",
+            "webui.server:app",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            str(port),
+        ],
         stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+        text=True,
     )
     try:
         for _ in range(100):
             try:
-                if httpx.get(base + "/", timeout=1.0).status_code == 200:
+                if httpx.get(base + "/chat.html", timeout=1.0).status_code == 200:
                     break
             except Exception:
                 pass
             time.sleep(0.2)
         else:
             proc.terminate()
-            pytest.fail("uvicorn が起動しませんでした")
+            _, stderr = proc.communicate(timeout=10)
+            pytest.fail(f"uvicorn が起動しませんでした。\nSTDERR:\n{stderr}")
         yield base
     finally:
         proc.terminate()
