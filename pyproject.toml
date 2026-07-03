@@ -18,7 +18,7 @@ dependencies = [
 
 [dependency-groups]
 dev = [
-    "moto[s3,sqs]>=5.0",
+    "moto[s3,sqs]>=5.2.2",
     "pytest>=9.1.1",
     "pytest-cov>=7.1.0",
     "pytest-playwright>=0.8.0",
