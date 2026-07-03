@@ -4,7 +4,7 @@
 `PDF → 抽出 → チャンク → 埋め込み → pgvector 格納 → 最小検索` までを対象とする（回答生成 LLM はスコープ外）。
 
 - **開発**: ローカル完結（無料）— Ollama `bge-m3` + Docker pgvector
-- **本番**: AWS（ECS Fargate + Lambda + SQS + Aurora pgvector + Bedrock Titan V2）※2nd ステージ
+- **本番**: AWS（ECS Fargate + Lambda + SQS + Bedrock Titan V2）+ ベクトル DB のみ Neon（サーバレス Postgres・pgvector）※2nd ステージ・無課金デプロイの詳細は [ADR 0015](docs/adr/0015-zero-cost-deployment.md)
 - 詳細設計は [`docs/design.md`](docs/design.md)、意思決定の経緯は [`docs/adr/`](docs/adr/) を参照
 
 > **現在のステータス: MVP 完了（T1〜T5）＋ローカル RAG チャット UI＋精度改善・書籍管理機能。** ローカルで PDF→抽出→チャンク→埋め込み→pgvector→検索の縦串が通り、Ollama を使ったチャット UI（`/chat.html`）から質問できる。検索精度改善（Rerank/Hybrid/HyDE/Citation/スコア閾値判定/隣接チャンク展開）・書籍単位の絞り込み検索・書籍削除・取り込みステータス永続化・構造化ログ／ヘルスチェックをフラグ・API で提供。非同期化・AWS 化は 2nd ステージ。

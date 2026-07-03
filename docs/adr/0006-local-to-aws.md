@@ -1,8 +1,8 @@
 # 0006. 開発ローカル完結 → 本番 AWS 移行
 
-- 状態: Accepted
+- 状態: Accepted（[ADR 0015](0015-zero-cost-deployment.md) によりベクトル DB のみ Aurora → Neon に変更。埋め込み(Bedrock)・本番構成の他要素は本 ADR のまま）
 - 日付: 2026-06-16
-- 関連: [design.md](../design.md) §6, §9、[ADR 0001](0001-layer-separation.md)、[ADR 0005](0005-ollama-dev-embeddings.md)
+- 関連: [design.md](../design.md) §6, §9、[ADR 0001](0001-layer-separation.md)、[ADR 0005](0005-ollama-dev-embeddings.md)、[ADR 0015](0015-zero-cost-deployment.md)
 
 ## コンテキスト
 
