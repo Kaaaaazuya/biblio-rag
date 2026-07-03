@@ -7,7 +7,7 @@
 - **本番**: AWS（ECS Fargate + Lambda + SQS + Aurora pgvector + Bedrock Titan V2）※2nd ステージ
 - 詳細設計は [`docs/design.md`](docs/design.md)、意思決定の経緯は [`docs/adr/`](docs/adr/) を参照
 
-> **現在のステータス: MVP 完了（T1〜T5）＋ローカル RAG チャット UI。** ローカルで PDF→抽出→チャンク→埋め込み→pgvector→検索の縦串が通り、Ollama を使ったチャット UI（`/chat.html`）から質問できる。非同期化・AWS 化は 2nd ステージ。
+> **現在のステータス: MVP 完了（T1〜T5）＋ローカル RAG チャット UI＋精度改善・書籍管理機能。** ローカルで PDF→抽出→チャンク→埋め込み→pgvector→検索の縦串が通り、Ollama を使ったチャット UI（`/chat.html`）から質問できる。検索精度改善（Rerank/Hybrid/HyDE/Citation/スコア閾値判定/隣接チャンク展開）・書籍単位の絞り込み検索・書籍削除・取り込みステータス永続化・構造化ログ／ヘルスチェックをフラグ・API で提供。非同期化・AWS 化は 2nd ステージ。
 
 > 🚀 **すぐ動かしたい人は [docs/quickstart.md](docs/quickstart.md)** へ（同梱の著作権フリーPDFで検索結果まで一気通貫）。
 
@@ -155,11 +155,18 @@ PDF・書名・著者を入力 → `raw/<file>.pdf` が S3 に作られ、書誌
 取り込み済みの書籍に対してチャットで質問できる最小 UI。
 
 - **Ollama でストリーミング生成**（`qwen2.5:7b` デフォルト。`CHAT_MODEL` で変更可）
-- ページ右上でペルソナ（優しい先輩 / 厳しい先生 / やさしく説明）と言語（日本語 / English）を切替可
+- ページ右上でペルソナ（優しい先輩 / 厳しい先生 / やさしく説明）・言語（日本語 / English）・**対象書籍**（全書籍 or 書籍単位で絞り込み）を切替可
+- 生成中断ボタン（AbortController）でストリーミングをキャンセル可能
 - 回答の根拠チャンクを「ソース」チップで表示。クリックで原文モーダルを開く
 - 会話履歴を localStorage に保持（ページリロード後も復元）
-- Markdown レンダリング対応（marked.js）
-- **Rerank**（オプション）: `RERANK_ENABLED=true` でクロスエンコーダ再スコアリングを有効化。候補 `RERANK_CANDIDATE_K`（デフォルト 20）件から上位 top_k 件を絞り込む（`bge-reranker-v2-m3`）
+- Markdown レンダリング対応（marked.js、DOMPurify でサニタイズ）
+- **検索精度改善フラグ**（すべてオプション・`.env` で有効化。詳細は [ADR 0013](docs/adr/0013-rag-precision-improvements.md)）:
+  - `RERANK_ENABLED`: クロスエンコーダ（`bge-reranker-v2-m3`）で候補 `RERANK_CANDIDATE_K`（デフォルト 20）件から上位 top_k 件を再スコアリング
+  - `HYBRID_ENABLED`: pg_bigm キーワード検索と RRF 融合
+  - `HYDE_ENABLED`: 仮説回答生成でクエリを書き換えてから検索
+  - `CITATION_ENABLED`: 回答内に `[1][2]` の引用番号を付与
+  - `SCORE_THRESHOLD_ENABLED`: ベクトル類似度が閾値未満の場合、LLM を呼ばず「該当情報なし」を返し幻覚を防ぐ
+  - `ADJACENT_CHUNK_ENABLED`: ヒットしたチャンクの前後（`chunk_index` ±window）を追加取得し文脈を補う
 
 ```
 http://localhost:8000/chat.html
@@ -167,6 +174,22 @@ http://localhost:8000/chat.html
 
 > **速度について**: Docker 内 Ollama は Metal GPU が使えず CPU 動作。速度を優先するには
 > native Ollama（`ollama serve`）を使い `OLLAMA_HOST=http://localhost:11434` を `.env` に設定する。
+
+### 書籍管理（アップロード画面 `/`）
+
+- 取り込み済み書籍の一覧を表示し、書籍単位で削除できる（`raw`/`normalized`/`chunks` の S3 ファイルと pgvector のチャンク・取り込みステータス履歴を横断して削除）
+- 取り込み中（pending/processing）の書籍は削除不可（`_run_pipeline` との競合防止）
+
+### 主な API エンドポイント
+
+| エンドポイント | 用途 |
+|---|---|
+| `GET /api/health` | DB・Ollama の疎通確認（200=healthy / 503=unhealthy） |
+| `POST /api/chat` | RAG チャット（SSE ストリーム）。`book_id` 指定で書籍を絞り込み検索 |
+| `GET /api/books` | 取り込み済み書籍一覧（`book_id`/`title`/`author`） |
+| `DELETE /api/books/{book_id}` | 書籍データの横断削除（S3 + pgvector + ステータス履歴） |
+| `GET /api/ingest/{book_id}/status` | 取り込みステータス（PostgreSQL に永続化・プロセス再起動後も保持） |
+| `GET /api/ingest/{book_id}/status/history` | 取り込みステータスの全遷移履歴 |
 
 ## セキュリティ / データ取り扱いルール（厳守）
 
@@ -226,12 +249,15 @@ workers/
   chunk/          # ② チャンク（サイズ可変）
   embed/          # ③ 埋め込み + 格納（Embedder/VectorStore 抽象化）
   rerank/         # ④ クロスエンコーダ再スコアリング（オプション）
+  storage/        # ObjectStore（S3/MinIO）+ StatusStore（取り込みステータス永続化）
 webui/
-  server.py       # Starlette アプリ（アップロード API + RAG チャット SSE）
+  server.py       # Starlette アプリ（アップロード API + RAG チャット SSE + 書籍管理 API）
+  logging_config.py # 構造化 JSON ログ設定
   static/
-    index.html    # アップロード UI
-    chat.html     # RAG チャット UI
+    index.html    # アップロード UI（書籍一覧・削除を含む）
+    chat.html     # RAG チャット UI（書籍選択・生成中断を含む）
     chat.js       # チャット fetch/SSE クライアント
+    app.js        # アップロード・書籍管理クライアント
 infra/db/         # pgvector スキーマ（開発/本番共通）
 docker/           # docker-compose.yml（postgres + Ollama）
 tests/fixtures/   # 著作権フリーのテスト用データ（コミット可）
