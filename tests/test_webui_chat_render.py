@@ -75,3 +75,46 @@ def test_marked_renders_markdown_in_browser(page, server):
     assert "<h1" in rendered, f"見出しがレンダリングされていない: {rendered}"
     assert "<strong>太字</strong>" in rendered, f"太字がレンダリングされていない: {rendered}"
     assert "<code>コード</code>" in rendered, f"コードがレンダリングされていない: {rendered}"
+
+
+def test_restored_history_renders_markdown(page, server):
+    """ページリロード後の履歴復元でも Markdown レンダリングが行われることを確認する（Issue #37）。
+
+    送信時と同じレンダリング処理（marked.parse + DOMPurify.sanitize）を経ているかを検証する。
+    """
+    page.goto(f"{server}/chat.html")
+
+    page.evaluate(
+        """() => {
+            localStorage.setItem("biblio-rag:chat-v1", JSON.stringify({
+                history: [
+                    { role: "user", content: "質問" },
+                    { role: "assistant", content: "**太字** と `コード`" },
+                ],
+                displayed: [
+                    { role: "user", text: "質問" },
+                    { role: "assistant", text: "**太字** と `コード`" },
+                ],
+                lang: "ja",
+                persona: "",
+                book: "",
+            }));
+        }"""
+    )
+    page.reload()
+
+    assistant_bubble = page.locator(".message.assistant .bubble").first
+    assert "rendered" in (assistant_bubble.get_attribute("class") or ""), (
+        "復元されたassistantメッセージがMarkdownレンダリングされていない"
+    )
+    inner_html = assistant_bubble.inner_html()
+    assert "<strong>太字</strong>" in inner_html, (
+        f"太字が復元時にレンダリングされていない: {inner_html}"
+    )
+    assert "<code>コード</code>" in inner_html, (
+        f"コードが復元時にレンダリングされていない: {inner_html}"
+    )
+
+    # user メッセージはプレーンテキストのまま（従来通り）
+    user_bubble = page.locator(".message.user .bubble").first
+    assert user_bubble.inner_text() == "質問"

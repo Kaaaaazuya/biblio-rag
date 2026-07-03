@@ -46,7 +46,13 @@ function loadStorage() {
     if (!raw) return;
     const { history: h, displayed: d, lang, persona, book } = JSON.parse(raw);
     history.push(...(h ?? []));
-    (d ?? []).forEach(({ role, text }) => addMessage(role, text));
+    (d ?? []).forEach(({ role, text }) => {
+      if (role === "assistant") {
+        renderAssistantContent(addMessage(role), text);
+      } else {
+        addMessage(role, text);
+      }
+    });
     if (lang) langSelect.value = lang;
     if (persona) personaSelect.value = persona;
     if (book) bookSelect.dataset.restore = book;
@@ -126,6 +132,23 @@ function addMessage(role, text = "") {
   messagesEl.appendChild(wrap);
   scrollBottom();
   return bubble;
+}
+
+function renderAssistantContent(bubble, text) {
+  if (!text) return;
+  try {
+    const html = marked.parse(text);
+    // XSS protection: Markdown レンダリング結果をサニタイズ
+    if (typeof DOMPurify === "undefined") {
+      console.error("DOMPurify not loaded; XSS protection unavailable");
+      bubble.textContent = text;
+    } else {
+      bubble.innerHTML = DOMPurify.sanitize(html);
+      bubble.classList.add("rendered");
+    }
+  } catch (_) {
+    bubble.textContent = text;
+  }
 }
 
 function showSpinner(bubble) {
@@ -266,21 +289,7 @@ async function sendMessage() {
       }
     }
 
-    if (fullContent) {
-      try {
-        const html = marked.parse(fullContent);
-        // XSS protection: Markdown レンダリング結果をサニタイズ
-        if (typeof DOMPurify === "undefined") {
-          console.error("DOMPurify not loaded; XSS protection unavailable");
-          bubble.textContent = fullContent;
-        } else {
-          bubble.innerHTML = DOMPurify.sanitize(html);
-          bubble.classList.add("rendered");
-        }
-      } catch (_) {
-        bubble.textContent = fullContent;
-      }
-    }
+    renderAssistantContent(bubble, fullContent);
     addSources(pendingSources);
     history.push({ role: "user", content: query });
     history.push({ role: "assistant", content: fullContent });
