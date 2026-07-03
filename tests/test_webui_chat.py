@@ -139,7 +139,10 @@ def test_chat_with_hyde_enabled(monkeypatch):
         async def stream_chat(self, messages, model=None):
             yield "仮説回答"
 
-    monkeypatch.setattr(server, "_make_chat_client", lambda: FakeHyDEClient())
+    def mock_make_chat_client(timeout=None):
+        return FakeHyDEClient()
+
+    monkeypatch.setattr(server, "_make_chat_client", mock_make_chat_client)
 
     retrieved_query = None
 
@@ -163,7 +166,10 @@ def test_chat_with_hyde_failure_fallback(monkeypatch):
             raise RuntimeError("HyDE failed")
             yield ""  # noqa: F501
 
-    monkeypatch.setattr(server, "_make_chat_client", lambda: FailingHyDEClient())
+    def mock_make_chat_client(timeout=None):
+        return FailingHyDEClient()
+
+    monkeypatch.setattr(server, "_make_chat_client", mock_make_chat_client)
 
     retrieved_query = None
 

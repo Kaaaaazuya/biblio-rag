@@ -217,7 +217,7 @@ async def _hyde(query: str) -> str:
     """クエリへの仮説回答を ChatClient で生成して返す（HyDE）。"""
     content = ""
     try:
-        client = _make_chat_client()
+        client = _make_chat_client(timeout=30.0)
         async for token in client.stream_chat(
             [{"role": "user", "content": f"次の質問に対して簡潔に答えてください: {query}"}]
         ):
@@ -277,12 +277,15 @@ _LANG_INSTRUCTIONS: dict[str, str] = {
 }
 
 
-def _make_chat_client():
+def _make_chat_client(timeout: float | None = None):
     """設定に基づいてChatClientを作成する。"""
     from workers.chat.ollama_chat import OllamaChatClient
 
     if config.CHAT_BACKEND == "ollama":
-        return OllamaChatClient(config.OLLAMA_HOST, config.CHAT_MODEL)
+        kwargs: dict[str, float] = {}
+        if timeout is not None:
+            kwargs["timeout"] = timeout
+        return OllamaChatClient(config.OLLAMA_HOST, config.CHAT_MODEL, **kwargs)
     # 将来: bedrock 実装を追加
     raise ValueError(f"Unknown CHAT_BACKEND: {config.CHAT_BACKEND}")
 
