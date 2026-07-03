@@ -3,17 +3,14 @@
 from __future__ import annotations
 
 import base64
-import logging
 
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from workers import config
 
-logger = logging.getLogger(__name__)
-
 # 認証不要なエンドポイント（ヘルスチェックは常に実行可能）
-UNPROTECTED_PATHS = {"/api/health", "/"}
+UNPROTECTED_PATHS = {"/api/health"}
 
 
 def _extract_bearer_token(auth_header: str | None) -> str | None:
