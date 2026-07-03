@@ -77,7 +77,11 @@ def test_ingest_bad_book_id():
     assert res.status_code == 400
 
 
-def test_ingest_status_unknown():
+def test_ingest_status_unknown(monkeypatch):
+    mock_store = MagicMock()
+    mock_store.get_current_status.return_value = None
+    monkeypatch.setattr(server, "_status_store", mock_store)
+
     res = client.get("/api/ingest/nonexistent/status")
     assert res.status_code == 200
     assert res.json()["status"] == "unknown"
@@ -86,6 +90,16 @@ def test_ingest_status_unknown():
 def test_ingest_sets_pending_status(monkeypatch):
     # パイプライン本体は呼ばずにステータス遷移だけ確認
     monkeypatch.setattr(server, "_run_pipeline", lambda book_id: None)
+
+    mock_store = MagicMock()
+    mock_store.get_current_status.return_value = {
+        "status": "pending",
+        "chunks_processed": 0,
+        "error_msg": None,
+        "updated_at": None,
+    }
+    monkeypatch.setattr(server, "_status_store", mock_store)
+
     client.post("/api/ingest", json={"book_id": "testbook"})
     res = client.get("/api/ingest/testbook/status")
     assert res.status_code == 200

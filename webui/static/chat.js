@@ -4,6 +4,7 @@ const messagesEl    = document.getElementById("messages");
 const emptyEl       = document.getElementById("empty");
 const queryEl       = document.getElementById("query");
 const sendBtn       = document.getElementById("send-btn");
+const abortBtn      = document.getElementById("abort-btn");
 const clearBtn      = document.getElementById("clear-btn");
 const personaSelect = document.getElementById("persona-select");
 const langSelect    = document.getElementById("lang-select");
@@ -20,6 +21,9 @@ const STORAGE_KEY = "biblio-rag:chat-v1";
 const history = [];
 // 表示用メッセージ（ページ復元用）
 const displayed = []; // {role, text}
+
+// AbortController for in-flight requests
+let abortController = null;
 
 // ── 永続化 ────────────────────────────────────────────────────────────────────
 
@@ -137,6 +141,8 @@ function setLoading(loading) {
   langSelect.disabled = loading;
   sendBtn.classList.toggle("loading", loading);
   sendBtn.textContent = loading ? "" : "↑";
+  // Show/hide abort button
+  abortBtn.classList.toggle("visible", loading);
 }
 
 // ── Auto-resize textarea ──────────────────────────────────────────────────────
@@ -156,6 +162,11 @@ queryEl.addEventListener("keydown", (e) => {
 });
 
 sendBtn.addEventListener("click", sendMessage);
+abortBtn.addEventListener("click", () => {
+  if (abortController) {
+    abortController.abort();
+  }
+});
 
 async function sendMessage() {
   const query = queryEl.value.trim();
@@ -174,6 +185,9 @@ async function sendMessage() {
   let firstToken = true;
   let pendingSources = [];
 
+  // Create new AbortController for this request
+  abortController = new AbortController();
+
   try {
     const resp = await fetch("/api/chat", {
       method: "POST",
@@ -184,6 +198,7 @@ async function sendMessage() {
         persona: personaSelect.value,
         lang: langSelect.value,
       }),
+      signal: abortController.signal,
     });
 
     if (!resp.ok) {
@@ -244,13 +259,23 @@ async function sendMessage() {
     displayed.push({ role: "user", text: query });
     displayed.push({ role: "assistant", text: fullContent });
     saveStorage();
-  } catch (_err) {
+  } catch (err) {
     spinner.remove();
+    // Handle abort separately
     bubble.dataset.error = "1";
-    bubble.textContent = fullContent || "⚠ エラーが発生しました";
+    if (err.name === "AbortError") {
+      bubble.textContent = fullContent
+        ? `${fullContent}\n\n📍 キャンセルされました`
+        : "📍 キャンセルされました";
+    } else {
+      bubble.textContent = fullContent
+        ? `${fullContent}\n\n⚠ エラーが発生しました`
+        : "⚠ エラーが発生しました";
+    }
     scrollBottom();
   } finally {
     setLoading(false);
+    abortController = null;
     queryEl.focus();
   }
 }
