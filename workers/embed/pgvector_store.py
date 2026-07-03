@@ -71,6 +71,22 @@ class PgVectorStore(VectorStore):
             cur.execute(sql, params)
             return cur.fetchall()
 
+    def get_by_indices(self, book_id: str, chunk_indices: Sequence[int]) -> list[dict]:
+        """指定 book_id 内の chunk_index 群を取得する（隣接チャンク展開用）。"""
+        if not chunk_indices:
+            return []
+        with self.conn.transaction(), self.conn.cursor(row_factory=dict_row) as cur:
+            cur.execute(
+                """
+                    SELECT book_id, chunk_index, title, author, chapter, section, page, text
+                    FROM chunks
+                    WHERE book_id = %(book_id)s AND chunk_index = ANY(%(indices)s)
+                    ORDER BY chunk_index
+                    """,
+                {"book_id": book_id, "indices": list(chunk_indices)},
+            )
+            return cur.fetchall()
+
     def count_book(self, book_id: str) -> int:
         """その書籍が既に格納されているか（チャンク行数）。増分判定に使う。"""
         with self.conn.transaction(), self.conn.cursor() as cur:

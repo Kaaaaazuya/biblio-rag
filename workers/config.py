@@ -27,6 +27,14 @@ CITATION_ENABLED = os.getenv("CITATION_ENABLED", "false").lower() == "true"
 RERANK_CANDIDATE_K = int(os.getenv("RERANK_CANDIDATE_K", "20"))
 RERANK_MODEL = os.getenv("RERANK_MODEL", "BAAI/bge-reranker-v2-m3")
 
+# スコア閾値未満のチャンクを除外し、「該当情報なし」を明示する（幻覚対策）
+SCORE_THRESHOLD_ENABLED = os.getenv("SCORE_THRESHOLD_ENABLED", "false").lower() == "true"
+SCORE_THRESHOLD = float(os.getenv("SCORE_THRESHOLD", "0.5"))
+
+# ヒットしたチャンクの前後（chunk_index ±window）を追加取得し、文脈の連続性を補う
+ADJACENT_CHUNK_ENABLED = os.getenv("ADJACENT_CHUNK_ENABLED", "false").lower() == "true"
+ADJACENT_CHUNK_WINDOW = int(os.getenv("ADJACENT_CHUNK_WINDOW", "1"))
+
 # オブジェクトストレージ（開発: MinIO / 本番: AWS S3）
 # 本番は S3_ENDPOINT_URL を空にすると boto3 が AWS S3 を指す。
 S3_ENDPOINT_URL = os.getenv("S3_ENDPOINT_URL") or None

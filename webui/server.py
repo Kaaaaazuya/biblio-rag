@@ -134,10 +134,14 @@ def _object_exists(bucket: str, key: str) -> bool:
 def _retrieve(query: str, top_k: int, book_id: str | None = None) -> list[dict]:
     """クエリを埋め込み、pgvector から類似チャンクを取得する（同期・スレッドで実行）。
 
-    HYDE_ENABLED   : 仮説回答を生成してからベクトル化する
-    HYBRID_ENABLED : pg_bigm キーワード検索と RRF 融合する
-    RERANK_ENABLED : CrossEncoder で再スコアリングして top_k に絞る
-    book_id        : 指定時はその書籍のチャンクのみを対象にする
+    HYDE_ENABLED           : 仮説回答を生成してからベクトル化する
+    HYBRID_ENABLED         : pg_bigm キーワード検索と RRF 融合する
+    RERANK_ENABLED         : CrossEncoder で再スコアリングして top_k に絞る
+    SCORE_THRESHOLD_ENABLED: ベクトル検索直後にスコア閾値未満の候補を除外する
+                             （HYBRID/RERANK 適用前 = キーワードのみのヒットや
+                             Rerank の再評価がベクトル類似度の閾値で握りつぶされないようにする）
+    ADJACENT_CHUNK_ENABLED : ヒットチャンクの前後（chunk_index ±window）を追加取得する
+    book_id                : 指定時はその書籍のチャンクのみを対象にする
     """
     from workers.embed.ollama_embedder import OllamaEmbedder
     from workers.embed.pgvector_store import PgVectorStore
@@ -158,6 +162,11 @@ def _retrieve(query: str, top_k: int, book_id: str | None = None) -> list[dict]:
         chunks = store.search(
             vec, top_k=candidate_k, book_id=book_id, embed_model=active_embed_model()
         )
+        if config.SCORE_THRESHOLD_ENABLED:
+            # HYBRID/RERANK より前に適用: kw_chunks の bigm スコアや rerank 前のベクトル
+            # スコアが後続処理で上書き・無視されるため、ここでのみベクトル類似度と比較する
+            chunks = [c for c in chunks if (c.get("score") or 0) >= config.SCORE_THRESHOLD]
+
         if config.HYBRID_ENABLED:
             try:
                 chunks = _hybrid_rrf(query, chunks, store, candidate_k, book_id=book_id)
@@ -176,7 +185,41 @@ def _retrieve(query: str, top_k: int, book_id: str | None = None) -> list[dict]:
 
             chunks = SentenceReranker(config.RERANK_MODEL).rerank(query, chunks, top_k)
 
+    if config.ADJACENT_CHUNK_ENABLED and chunks:
+        from workers.embed.pgvector_store import PgVectorStore as _PgVectorStore
+
+        adj_store = _PgVectorStore(config.database_url())
+        try:
+            chunks = _expand_adjacent_chunks(chunks, adj_store, config.ADJACENT_CHUNK_WINDOW)
+        finally:
+            adj_store.close()
+
     return chunks
+
+
+def _expand_adjacent_chunks(chunks: list[dict], store, window: int) -> list[dict]:
+    """ヒットしたチャンクの前後（chunk_index ±window）を追加取得してマージする。
+
+    ADJACENT_CHUNK_ENABLED 時に呼ばれる。既にヒット済みの chunk_index は
+    再取得しない。書籍ごとにグルーピングし、
+    最終結果は book_id, chunk_index 順に並べ直す（文脈の連続性のため）。
+    """
+    seen = {(c["book_id"], c["chunk_index"]) for c in chunks}
+    needed: dict[str, set[int]] = {}
+    for c in chunks:
+        book_id, idx = c["book_id"], c["chunk_index"]
+        for offset in range(1, window + 1):
+            for neighbor_idx in (idx - offset, idx + offset):
+                if neighbor_idx >= 0 and (book_id, neighbor_idx) not in seen:
+                    needed.setdefault(book_id, set()).add(neighbor_idx)
+
+    extra: list[dict] = []
+    for book_id, indices in needed.items():
+        extra.extend(store.get_by_indices(book_id, sorted(indices)))
+
+    merged = chunks + extra
+    merged.sort(key=lambda c: (c["book_id"], c["chunk_index"]))
+    return merged
 
 
 def _hyde(query: str) -> str:
@@ -259,6 +302,8 @@ _CITATION_INSTRUCTION = (
     "回答中で情報を使ったときは [1] [2] の形で引用番号を示してください。\n"
 )
 
+_NO_RESULTS_MESSAGE = "参考文献の中に、ご質問に該当する情報が見つかりませんでした。"
+
 
 def _validate_chat_input(body: dict) -> tuple[str | None, int]:
     """
@@ -338,6 +383,16 @@ async def chat(request: Request) -> StreamingResponse | JSONResponse:
             {"detail": "An error occurred while retrieving documents. Please try again."},
             status_code=500,
         )
+
+    if config.SCORE_THRESHOLD_ENABLED and not chunks:
+        # スコア閾値未満で全チャンクが除外された場合、LLM を呼ばず幻覚を防ぐ
+        async def no_results_stream():
+            yield f"data: {json.dumps({'type': 'sources', 'sources': []})}\n\n"
+            msg = json.dumps({"type": "token", "content": _NO_RESULTS_MESSAGE}, ensure_ascii=False)
+            yield f"data: {msg}\n\n"
+            yield f"data: {json.dumps({'type': 'done'})}\n\n"
+
+        return StreamingResponse(no_results_stream(), media_type="text/event-stream")
 
     if config.CITATION_ENABLED:
         context = "\n\n".join(
