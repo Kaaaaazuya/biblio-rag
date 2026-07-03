@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 
+from starlette.datastructures import Headers
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
@@ -54,9 +55,9 @@ def _verify_basic_auth(username: str, password: str) -> bool:
 
 
 def _is_protected_path(path: str) -> bool:
-    """パスが認証保護対象かを判定。"""
+    """パスが認証保護対象かを判定。完全一致またはスラッシュ境界での前方一致のみ許可。"""
     for unprotected in UNPROTECTED_PATHS:
-        if path == unprotected or path.startswith(unprotected):
+        if path == unprotected or path.startswith(unprotected + "/"):
             return False
     return True
 
@@ -82,8 +83,8 @@ class AuthMiddleware:
             await self.app(scope, receive, send)
             return
 
-        # Authorization ヘッダを取得
-        headers = {name.decode(): value.decode() for name, value in scope.get("headers", [])}
+        # Authorization ヘッダを取得（大文字小文字を区別しない）
+        headers = Headers(scope=scope)
         auth_header = headers.get("authorization")
 
         # 認証方式に応じて検証
