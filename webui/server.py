@@ -215,9 +215,9 @@ def _expand_adjacent_chunks(chunks: list[dict], store, window: int) -> list[dict
 
 async def _hyde(query: str) -> str:
     """クエリへの仮説回答を ChatClient で生成して返す（HyDE）。"""
-    client = _make_chat_client()
     content = ""
     try:
+        client = _make_chat_client()
         async for token in client.stream_chat(
             [{"role": "user", "content": f"次の質問に対して簡潔に答えてください: {query}"}]
         ):
@@ -394,11 +394,7 @@ async def chat(request: Request) -> StreamingResponse | JSONResponse:
     # HyDE: クエリから仮説回答を生成（非同期）
     search_query = query
     if config.HYDE_ENABLED:
-        try:
-            search_query = await _hyde(query)
-        except Exception as e:  # noqa: BLE001
-            logger.warning(f"HyDE 失敗: {e}, クエリにフォールバック")
-            search_query = query
+        search_query = await _hyde(query)
 
     # 検索実行（同期・スレッド）
     loop = asyncio.get_running_loop()

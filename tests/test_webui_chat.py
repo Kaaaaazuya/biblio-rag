@@ -129,3 +129,50 @@ def test_chat_sse_chat_client_error(monkeypatch, caplog):
     # 内部情報（model not found）は返さない
     assert "model not found" not in errors[0]["message"]
     assert "An error occurred" in errors[0]["message"]
+
+
+def test_chat_with_hyde_enabled(monkeypatch):
+    """HYDE_ENABLED=true のとき、仮説回答が生成されて retrieval に渡されることを確認。"""
+    monkeypatch.setattr(server.config, "HYDE_ENABLED", True)
+
+    class FakeHyDEClient(ChatClient):
+        async def stream_chat(self, messages, model=None):
+            yield "仮説回答"
+
+    monkeypatch.setattr(server, "_make_chat_client", lambda: FakeHyDEClient())
+
+    retrieved_query = None
+
+    def fake_retrieve(query, top_k, book_id=None):
+        nonlocal retrieved_query
+        retrieved_query = query
+        return _fake_retrieve(query, top_k, book_id)
+
+    monkeypatch.setattr(server, "_retrieve", fake_retrieve)
+
+    _client.post("/api/chat", json={"query": "元の質問"})
+    assert retrieved_query == "仮説回答"
+
+
+def test_chat_with_hyde_failure_fallback(monkeypatch):
+    """HyDE 生成が失敗した場合、元のクエリにフォールバックして retrieval が実行されることを確認。"""
+    monkeypatch.setattr(server.config, "HYDE_ENABLED", True)
+
+    class FailingHyDEClient(ChatClient):
+        async def stream_chat(self, messages, model=None):
+            raise RuntimeError("HyDE failed")
+            yield ""  # noqa: F501
+
+    monkeypatch.setattr(server, "_make_chat_client", lambda: FailingHyDEClient())
+
+    retrieved_query = None
+
+    def fake_retrieve(query, top_k, book_id=None):
+        nonlocal retrieved_query
+        retrieved_query = query
+        return _fake_retrieve(query, top_k, book_id)
+
+    monkeypatch.setattr(server, "_retrieve", fake_retrieve)
+
+    _client.post("/api/chat", json={"query": "元の質問"})
+    assert retrieved_query == "元の質問"

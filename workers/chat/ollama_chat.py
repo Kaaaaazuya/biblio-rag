@@ -43,6 +43,7 @@ class OllamaChatClient(ChatClient):
                 json={"model": use_model, "messages": messages, "stream": True},
             ) as resp,
         ):
+            resp.raise_for_status()
             async for line in resp.aiter_lines():
                 if not line:
                     continue
@@ -51,11 +52,15 @@ class OllamaChatClient(ChatClient):
                 except json.JSONDecodeError:
                     continue
 
+                if not isinstance(data, dict):
+                    continue
+
                 if err := data.get("error"):
                     logger.error(f"Ollama error: {err}")
                     raise RuntimeError(f"Ollama error: {err}")
 
-                if content := data.get("message", {}).get("content", ""):
+                message = data.get("message")
+                if isinstance(message, dict) and (content := message.get("content", "")):
                     yield content
 
                 if data.get("done"):

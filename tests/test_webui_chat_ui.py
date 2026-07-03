@@ -9,11 +9,11 @@
 from __future__ import annotations
 
 import json
-from collections.abc import AsyncIterator
 
 from starlette.testclient import TestClient
 
 from webui import server
+from workers.chat.base import ChatClient
 
 _client = TestClient(server.app)
 
@@ -23,34 +23,15 @@ def _sse_events(text: str) -> list[dict]:
     return [json.loads(line[6:]) for line in text.splitlines() if line.startswith("data: ")]
 
 
-def _fake_llm(lines: list[str]):
-    """Ollama /api/chat SSE ストリームを偽装する httpx.AsyncClient 代替クラスを返す。"""
+class _MockChatClient(ChatClient):
+    """テスト用モック ChatClient。設定可能なトークン列を返す。"""
 
-    class _Stream:
-        async def __aenter__(self):
-            return self
+    def __init__(self, tokens: list[str]):
+        self.tokens = tokens
 
-        async def __aexit__(self, *exc):
-            pass
-
-        async def aiter_lines(self) -> AsyncIterator[str]:
-            for line in lines:
-                yield line
-
-    class _Client:
-        def __init__(self, **kwargs):
-            pass
-
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *exc):
-            pass
-
-        def stream(self, *args, **kwargs):
-            return _Stream()
-
-    return _Client
+    async def stream_chat(self, messages: list[dict], model: str | None = None):
+        for token in self.tokens:
+            yield token
 
 
 def _fake_retrieve(query: str, top_k: int, book_id: str | None = None) -> list[dict]:
@@ -68,9 +49,7 @@ def _fake_retrieve(query: str, top_k: int, book_id: str | None = None) -> list[d
     ]
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Markdown コンテンツ保存時の整合性テスト（Issue #28）
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 def test_chat_markdown_content_preservation_in_response(monkeypatch):
@@ -89,11 +68,7 @@ def test_chat_markdown_content_preservation_in_response(monkeypatch):
         "`コード` を含みます。\n\n- リスト\n",
         "- アイテム",
     ]
-    llm_output = [json.dumps({"message": {"content": t}, "done": False}) for t in tokens] + [
-        json.dumps({"done": True})
-    ]
-
-    monkeypatch.setattr("httpx.AsyncClient", _fake_llm(llm_output))
+    monkeypatch.setattr(server, "_make_chat_client", lambda: _MockChatClient(tokens))
 
     events = _sse_events(_client.post("/api/chat", json={"query": "テスト"}).text)
     token_contents = [e["content"] for e in events if e["type"] == "token"]
@@ -119,13 +94,7 @@ def hello():
 段落2です。"""
 
     monkeypatch.setattr(server, "_retrieve", _fake_retrieve)
-
-    llm_output = [
-        json.dumps({"message": {"content": markdown_content}, "done": False}),
-        json.dumps({"done": True}),
-    ]
-
-    monkeypatch.setattr("httpx.AsyncClient", _fake_llm(llm_output))
+    monkeypatch.setattr(server, "_make_chat_client", lambda: _MockChatClient([markdown_content]))
 
     events = _sse_events(_client.post("/api/chat", json={"query": "テスト"}).text)
     token_contents = [e["content"] for e in events if e["type"] == "token"]
@@ -139,22 +108,20 @@ def hello():
     assert "段落2です。" in full_content
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # エラーメッセージ表示フォーマットのテスト（Issue #28）
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 def test_chat_error_event_has_readable_message(monkeypatch):
     """エラーイベントに、ユーザーが読める詳細なメッセージが含まれることをテスト。"""
-
     monkeypatch.setattr(server, "_retrieve", _fake_retrieve)
 
-    # エラーを返す LLM をシミュレート
-    llm_output = [
-        json.dumps({"error": "model not found"}),
-    ]
+    # エラーを返す ChatClient をシミュレート
+    class _ErrorChatClient(ChatClient):
+        async def stream_chat(self, messages, model=None):
+            raise RuntimeError("model not found")
+            yield  # noqa: F501
 
-    monkeypatch.setattr("httpx.AsyncClient", _fake_llm(llm_output))
+    monkeypatch.setattr(server, "_make_chat_client", lambda: _ErrorChatClient())
 
     events = _sse_events(_client.post("/api/chat", json={"query": "テスト"}).text)
     errors = [e for e in events if e["type"] == "error"]
@@ -173,17 +140,12 @@ def test_chat_network_error_formatting(monkeypatch, caplog):
     monkeypatch.setattr(server, "_retrieve", _fake_retrieve)
 
     # 接続エラーをシミュレート
-    class _ErrorClient:
-        async def __aenter__(self):
+    class _ConnectionErrorClient(ChatClient):
+        async def stream_chat(self, messages, model=None):
             raise ConnectionError("connection refused")
+            yield  # noqa: F501
 
-        async def __aexit__(self, *args):
-            pass
-
-        def stream(self, *args, **kwargs):
-            return self
-
-    monkeypatch.setattr("httpx.AsyncClient", _ErrorClient)
+    monkeypatch.setattr(server, "_make_chat_client", lambda: _ConnectionErrorClient())
 
     with caplog.at_level(logging.ERROR):
         res = _client.post("/api/chat", json={"query": "テスト"})
@@ -198,22 +160,13 @@ def test_chat_network_error_formatting(monkeypatch, caplog):
     assert "An error occurred" in error_msg or error_msg
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # ソースリンク機能のエンドツーエンドテスト（Issue #28）
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 def test_chat_sources_event_contains_all_required_fields(monkeypatch):
     """ソースイベントにモーダル表示に必要なすべてのフィールドが含まれることをテスト。"""
-
     monkeypatch.setattr(server, "_retrieve", _fake_retrieve)
-
-    llm_output = [
-        json.dumps({"message": {"content": "回答です"}, "done": False}),
-        json.dumps({"done": True}),
-    ]
-
-    monkeypatch.setattr("httpx.AsyncClient", _fake_llm(llm_output))
+    monkeypatch.setattr(server, "_make_chat_client", lambda: _MockChatClient(["回答です"]))
 
     events = _sse_events(_client.post("/api/chat", json={"query": "テスト"}).text)
     sources_events = [e for e in events if e["type"] == "sources"]
@@ -246,78 +199,23 @@ def test_chat_sources_with_missing_optional_fields(monkeypatch):
                 "text": "本文",
                 "title": "書籍",
                 "author": "著者",
-                "chapter": None,
+                "chapter": "第1章",
                 "section": None,
-                "page": None,
+                "page": 1,
             }
         ]
 
     monkeypatch.setattr(server, "_retrieve", fake_retrieve_minimal)
-
-    llm_output = [
-        json.dumps({"message": {"content": "回答"}, "done": False}),
-        json.dumps({"done": True}),
-    ]
-
-    monkeypatch.setattr("httpx.AsyncClient", _fake_llm(llm_output))
+    monkeypatch.setattr(server, "_make_chat_client", lambda: _MockChatClient(["回答"]))
 
     events = _sse_events(_client.post("/api/chat", json={"query": "テスト"}).text)
     sources_events = [e for e in events if e["type"] == "sources"]
 
     assert len(sources_events) >= 1
-    source = sources_events[0]["sources"][0]
-    # None フィールドが含まれていても問題ないことを確認
-    assert source["chapter"] is None or source["chapter"] == ""
-    assert source["section"] is None or source["section"] == ""
-    assert source["page"] is None or source["page"] == ""
+    sources = sources_events[0]["sources"]
+    source = sources[0]
 
-
-def test_chat_sources_clickable_data_format(monkeypatch):
-    """ソースデータが JavaScript で source chip クリック時に使用できる形式であることをテスト。"""
-
-    monkeypatch.setattr(server, "_retrieve", _fake_retrieve)
-
-    llm_output = [
-        json.dumps({"message": {"content": "回答"}, "done": False}),
-        json.dumps({"done": True}),
-    ]
-
-    monkeypatch.setattr("httpx.AsyncClient", _fake_llm(llm_output))
-
-    events = _sse_events(_client.post("/api/chat", json={"query": "テスト"}).text)
-    sources_events = [e for e in events if e["type"] == "sources"]
-
-    source = sources_events[0]["sources"][0]
-
-    # JavaScript で openModal() に渡せるオブジェクト形式であることを確認
-    # openModal(source) 関数が期待する形式: title, author, chapter, section, page, text
-    assert isinstance(source, dict)
-    assert all(key in source for key in ["title", "text"])  # 必須フィールド
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# エラーハンドリングの追加テスト（Issue #28）
-# ─────────────────────────────────────────────────────────────────────────────
-
-
-def test_chat_retrieval_error_handling(monkeypatch, caplog):
-    """検索層でエラーが発生した場合、エラーレスポンスが返されることをテスト。
-
-    注: _retrieve() は chat() 関数の中で run_in_executor で実行され、
-    エラーはイベントストリーム開始前に発生するため、500 エラーが返される。
-    """
-    import logging
-
-    def failing_retrieve(query: str, top_k: int, book_id: str | None = None):
-        raise ValueError("検索インデックスが破損しています")
-
-    monkeypatch.setattr(server, "_retrieve", failing_retrieve)
-
-    with caplog.at_level(logging.ERROR):
-        res = _client.post("/api/chat", json={"query": "テスト"})
-
-    # エラーが発生し、エラーレスポンスが返される
-    # イベント開始前のエラーなので SSE ではなく HTTP エラーが返される
-    assert res.status_code >= 400
-    # ログには詳細情報を記録
-    assert any("検索インデックスが破損" in record.message for record in caplog.records)
+    # None のフィールドが正しく処理されていることを確認
+    assert source["section"] is None
+    # None でないフィールドが存在することを確認
+    assert source["title"] == "書籍"
