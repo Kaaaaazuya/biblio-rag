@@ -186,9 +186,7 @@ def _retrieve(query: str, top_k: int, book_id: str | None = None) -> list[dict]:
             chunks = SentenceReranker(config.RERANK_MODEL).rerank(query, chunks, top_k)
 
     if config.ADJACENT_CHUNK_ENABLED and chunks:
-        from workers.embed.pgvector_store import PgVectorStore as _PgVectorStore
-
-        adj_store = _PgVectorStore(config.database_url())
+        adj_store = PgVectorStore(config.database_url())
         try:
             chunks = _expand_adjacent_chunks(chunks, adj_store, config.ADJACENT_CHUNK_WINDOW)
         finally:
