@@ -475,7 +475,7 @@ async def _parse_json_body(request: Request) -> tuple[dict, None] | tuple[None, 
     """
     try:
         body = await request.json()
-    except json.JSONDecodeError:
+    except ValueError:
         return None, JSONResponse({"detail": "不正な JSON ボディです"}, status_code=400)
     if not isinstance(body, dict):
         return None, JSONResponse({"detail": "不正な JSON ボディです"}, status_code=400)
