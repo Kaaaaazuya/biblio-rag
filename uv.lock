@@ -64,7 +64,7 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "moto", extras = ["s3", "sqs"], specifier = ">=5.0" },
+    { name = "moto", extras = ["s3", "sqs"], specifier = ">=5.2.2" },
     { name = "pytest", specifier = ">=9.1.1" },
     { name = "pytest-cov", specifier = ">=7.1.0" },
     { name = "pytest-playwright", specifier = ">=0.8.0" },
