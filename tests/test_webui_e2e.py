@@ -122,3 +122,23 @@ def test_chat_ui_xss_sanitization_dompurify_loaded():
     assert "purify.min.js" in content, "DOMPurify の最小化版が読み込まれていない"
     # SRI（Subresource Integrity）が設定されていることを確認
     assert "integrity=" in content, "DOMPurify に SRI が設定されていない"
+
+
+def test_chat_html_has_book_select():
+    """Issue #23: chat.html に書籍選択 UI（book-select）が含まれていることを確認。"""
+    from pathlib import Path
+
+    html_file = Path(__file__).parent.parent / "webui" / "static" / "chat.html"
+    content = html_file.read_text()
+
+    assert 'id="book-select"' in content
+
+
+def test_index_html_has_book_management_ui():
+    """Issue #24: index.html に書籍一覧・削除 UI が含まれていることを確認。"""
+    from pathlib import Path
+
+    html_file = Path(__file__).parent.parent / "webui" / "static" / "index.html"
+    content = html_file.read_text()
+
+    assert 'id="book-list"' in content

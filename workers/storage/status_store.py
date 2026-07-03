@@ -105,6 +105,15 @@ class StatusStore:
             )
             return cur.fetchall()
 
+    def delete_status(self, book_id: str) -> None:
+        """book_id に紐づく取り込みステータス履歴を全て削除する（書籍削除時に使用）。
+
+        Args:
+            book_id: Identifier for the book
+        """
+        with self.conn.transaction(), self.conn.cursor() as cur:
+            cur.execute("DELETE FROM ingestion_status WHERE book_id = %s", (book_id,))
+
     def close(self) -> None:
         """Close database connection."""
         self.conn.close()

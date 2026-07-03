@@ -51,7 +51,8 @@
         gap: 10px;
       }
 
-      #persona-select {
+      #persona-select,
+      #book-select {
         font-size: 12px;
         padding: 4px 8px;
         border: 1px solid var(--border);
@@ -60,6 +61,7 @@
         color: var(--text-main);
         cursor: pointer;
         outline: none;
+        max-width: 140px;
       }
 
       #clear-btn {
@@ -366,6 +368,9 @@
       <header class="chat-header">
         <h1>biblio-rag チャット</h1>
         <div class="header-actions">
+          <select id="book-select" title="対象書籍">
+            <option value="">📚 全書籍</option>
+          </select>
           <select id="lang-select" title="言語">
             <option value="ja">🇯🇵 日本語</option>
             <option value="en">🇺🇸 English</option>
