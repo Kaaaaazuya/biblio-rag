@@ -15,6 +15,8 @@ from urllib.parse import unquote
 from workers import config
 
 RAW_PREFIX = "raw/"
+NORMALIZED_PREFIX = "normalized/"
+CHUNKS_PREFIX = "chunks/"
 
 # S3 object metadata に載せる書誌情報のキー（値は US-ASCII 制約のため URL エンコード）。
 _META_KEYS = ("title", "author")
@@ -83,6 +85,18 @@ class ObjectStore:
             return {}
         raw = self.client.head_object(Bucket=self.bucket, Key=actual_key).get("Metadata", {})
         return {k: unquote(raw[k]) for k in _META_KEYS if k in raw}
+
+    def delete_book_files(self, book_id: str) -> None:
+        """book_id に紐づく raw/normalized/chunks の3ファイルを削除する。
+
+        存在しないファイルを指定してもエラーにならない（S3 の delete_object は冪等）。
+        """
+        for key in (
+            f"{RAW_PREFIX}{book_id}.pdf",
+            f"{NORMALIZED_PREFIX}{book_id}.md",
+            f"{CHUNKS_PREFIX}{book_id}.jsonl",
+        ):
+            self.client.delete_object(Bucket=self.bucket, Key=key)
 
     def _resolve_key(self, key: str) -> str | None:
         """NFC 正規化で一致する実際の S3 キーを返す。完全一致を先に試みる。"""

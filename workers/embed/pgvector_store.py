@@ -87,6 +87,21 @@ class PgVectorStore(VectorStore):
             )
             return cur.fetchall()
 
+    def list_books(self) -> list[dict]:
+        """格納済みチャンクから書籍一覧（book_id, title, author）を重複なく取得する。
+
+        チャット UI の書籍選択やアップロード画面の書籍管理に使う。
+        """
+        with self.conn.transaction(), self.conn.cursor(row_factory=dict_row) as cur:
+            cur.execute(
+                """
+                    SELECT DISTINCT ON (book_id) book_id, title, author
+                    FROM chunks
+                    ORDER BY book_id
+                    """
+            )
+            return cur.fetchall()
+
     def count_book(self, book_id: str) -> int:
         """その書籍が既に格納されているか（チャンク行数）。増分判定に使う。"""
         with self.conn.transaction(), self.conn.cursor() as cur:

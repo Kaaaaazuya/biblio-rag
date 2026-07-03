@@ -61,6 +61,7 @@ async function pollIngestStatus(book_id) {
     if (status === "done") {
       progress.value = 100;
       setStatus(`完了: book_id=${book_id}`, "ok");
+      await loadBookList();
       return;
     }
     if (status === "failed") {
@@ -68,6 +69,66 @@ async function pollIngestStatus(book_id) {
       return;
     }
     setStatus(label);
+  }
+}
+
+// ── 書籍一覧・削除（Issue #24） ────────────────────────────────────────────────
+
+const bookListEl = document.getElementById("book-list");
+const bookListEmptyEl = document.getElementById("book-list-empty");
+
+async function loadBookList() {
+  try {
+    const res = await fetch("/api/books");
+    if (!res.ok) return;
+    const books = await res.json();
+    renderBookList(books);
+  } catch (_) { /* 一覧取得失敗時は表示を変更しない */ }
+}
+
+function renderBookList(books) {
+  bookListEl.innerHTML = "";
+  bookListEmptyEl.hidden = books.length > 0;
+
+  for (const b of books) {
+    const li = document.createElement("li");
+
+    const title = document.createElement("span");
+    title.className = "book-title";
+    title.textContent = b.title || b.book_id;
+    li.appendChild(title);
+
+    if (b.author) {
+      const author = document.createElement("span");
+      author.className = "book-author";
+      author.textContent = b.author;
+      li.appendChild(author);
+    }
+
+    const delBtn = document.createElement("button");
+    delBtn.className = "delete";
+    delBtn.textContent = "削除";
+    delBtn.addEventListener("click", () => deleteBook(b.book_id, b.title || b.book_id));
+    li.appendChild(delBtn);
+
+    bookListEl.appendChild(li);
+  }
+}
+
+async function deleteBook(book_id, label) {
+  if (!confirm(`「${label}」を削除しますか？この操作は取り消せません。`)) return;
+  try {
+    const res = await fetch(`/api/books/${encodeURIComponent(book_id)}`, { method: "DELETE" });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      alert(body.detail || `削除に失敗しました (HTTP ${res.status})`);
+      // 502: 検索データ（pgvector）側は削除済みのため一覧を更新する
+      if (res.status === 502) await loadBookList();
+      return;
+    }
+    await loadBookList();
+  } catch (err) {
+    alert(err.message);
   }
 }
 
@@ -109,3 +170,6 @@ form.addEventListener("submit", async (e) => {
     submitBtn.disabled = false;
   }
 });
+
+// ── 起動時に書籍一覧を取得 ────────────────────────────────────────────────────
+loadBookList();

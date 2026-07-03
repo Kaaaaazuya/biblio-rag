@@ -8,6 +8,7 @@ const abortBtn      = document.getElementById("abort-btn");
 const clearBtn      = document.getElementById("clear-btn");
 const personaSelect = document.getElementById("persona-select");
 const langSelect    = document.getElementById("lang-select");
+const bookSelect    = document.getElementById("book-select");
 
 const modal      = document.getElementById("source-modal");
 const modalTitle = document.getElementById("modal-title");
@@ -34,6 +35,7 @@ function saveStorage() {
       displayed,
       lang: langSelect.value,
       persona: personaSelect.value,
+      book: bookSelect.value,
     }));
   } catch (_) { /* quota over 等は無視 */ }
 }
@@ -42,12 +44,35 @@ function loadStorage() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return;
-    const { history: h, displayed: d, lang, persona } = JSON.parse(raw);
+    const { history: h, displayed: d, lang, persona, book } = JSON.parse(raw);
     history.push(...(h ?? []));
     (d ?? []).forEach(({ role, text }) => addMessage(role, text));
     if (lang) langSelect.value = lang;
     if (persona) personaSelect.value = persona;
+    if (book) bookSelect.dataset.restore = book;
   } catch (_) { /* 破損データは無視 */ }
+}
+
+// ── 書籍選択 ──────────────────────────────────────────────────────────────────
+
+async function loadBooks() {
+  try {
+    const res = await fetch("/api/books");
+    if (!res.ok) return;
+    const books = await res.json();
+    for (const b of books) {
+      const opt = document.createElement("option");
+      opt.value = b.book_id;
+      opt.textContent = b.title || b.book_id;
+      bookSelect.appendChild(opt);
+    }
+    // localStorage 復元（book-select の option 追加後でないと選択できない）
+    const restore = bookSelect.dataset.restore;
+    if (restore && [...bookSelect.options].some((o) => o.value === restore)) {
+      bookSelect.value = restore;
+    }
+    delete bookSelect.dataset.restore;
+  } catch (_) { /* 書籍一覧取得失敗時は「全書籍」のまま */ }
 }
 
 function clearStorage() {
@@ -62,6 +87,8 @@ function clearStorage() {
 clearBtn.addEventListener("click", () => {
   if (confirm("会話履歴をクリアしますか？")) clearStorage();
 });
+
+bookSelect.addEventListener("change", saveStorage);
 
 // ── モーダル ──────────────────────────────────────────────────────────────────
 
@@ -197,6 +224,7 @@ async function sendMessage() {
         history: history.slice(),
         persona: personaSelect.value,
         lang: langSelect.value,
+        book_id: bookSelect.value || null,
       }),
       signal: abortController.signal,
     });
@@ -280,5 +308,6 @@ async function sendMessage() {
   }
 }
 
-// ── 起動時に履歴を復元 ────────────────────────────────────────────────────────
+// ── 起動時に履歴を復元 → 書籍一覧を取得 ─────────────────────────────────────────
 loadStorage();
+loadBooks();

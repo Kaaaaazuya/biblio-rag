@@ -706,6 +706,103 @@ def check_embedding_service() -> bool:
         return False
 
 
+def list_books(request: Request) -> JSONResponse:
+    """取り込み済み（pgvector 格納済み）の書籍一覧を返す。
+
+    チャット UI の書籍選択・アップロード画面の書籍管理に使用する。
+    """
+    from workers.embed.pgvector_store import PgVectorStore
+
+    try:
+        store = PgVectorStore(config.database_url())
+        try:
+            books = store.list_books()
+        finally:
+            store.close()
+    except Exception as e:  # noqa: BLE001
+        logger.error(f"Failed to list books: {e}", exc_info=True)
+        return JSONResponse({"detail": "Failed to list books. Please try again."}, status_code=500)
+    return JSONResponse(books)
+
+
+def delete_book(request: Request) -> JSONResponse:
+    """book_id に紐づく全データ（pgvector のチャンク + S3 の raw/normalized/chunks + 取り込み
+    ステータス履歴）を削除する。
+
+    取り込み中（pending/processing）の書籍は _run_pipeline との競合を避けるため削除を拒否する。
+    """
+    from workers.embed.pgvector_store import PgVectorStore
+    from workers.storage import ObjectStore
+
+    try:
+        book_id = _safe_name(request.path_params["book_id"])
+    except ValueError as e:
+        return JSONResponse({"detail": str(e)}, status_code=400)
+
+    try:
+        status_store = _get_status_store()
+        try:
+            current_status = status_store.get_current_status(book_id)
+        finally:
+            if status_store is not _status_store:
+                status_store.close()
+    except Exception as e:  # noqa: BLE001
+        logger.error(
+            f"Failed to check status before deleting book_id={book_id}: {e}", exc_info=True
+        )
+        return JSONResponse({"detail": "Failed to delete book. Please try again."}, status_code=500)
+
+    if current_status and current_status.get("status") in ("pending", "processing"):
+        return JSONResponse(
+            {"detail": "取り込み中の書籍は削除できません。完了してから再試行してください。"},
+            status_code=409,
+        )
+
+    try:
+        store = PgVectorStore(config.database_url())
+        try:
+            deleted_chunks = store.delete_book(book_id)
+        finally:
+            store.close()
+    except Exception as e:  # noqa: BLE001
+        logger.error(f"Failed to delete pgvector chunks for book_id={book_id}: {e}", exc_info=True)
+        return JSONResponse({"detail": "Failed to delete book. Please try again."}, status_code=500)
+
+    # pgvector 削除後にステータス履歴も削除する（失敗しても致命的ではないためログのみ）
+    try:
+        status_store = _get_status_store()
+        try:
+            status_store.delete_status(book_id)
+        finally:
+            if status_store is not _status_store:
+                status_store.close()
+    except Exception as e:  # noqa: BLE001
+        logger.error(f"Failed to delete status history for book_id={book_id}: {e}", exc_info=True)
+
+    try:
+        ObjectStore().delete_book_files(book_id)
+    except Exception as e:  # noqa: BLE001
+        # pgvector の削除は既に成功しているため、部分成功として明示的に報告する
+        logger.error(
+            f"Deleted pgvector chunks but failed to delete object storage files "
+            f"for book_id={book_id}: {e}",
+            exc_info=True,
+        )
+        return JSONResponse(
+            {
+                "detail": (
+                    "検索データは削除されましたが、ストレージ内のファイル削除に失敗しました。"
+                    "もう一度削除を実行してください。"
+                ),
+                "book_id": book_id,
+                "deleted_chunks": deleted_chunks,
+            },
+            status_code=502,
+        )
+
+    return JSONResponse({"book_id": book_id, "deleted_chunks": deleted_chunks})
+
+
 def health(request: Request) -> JSONResponse:
     """ヘルスチェックエンドポイント。DB と Ollama の接続状態をチェックする。"""
     db_ok = check_database_connectivity()
@@ -735,6 +832,8 @@ app = Starlette(
         Route("/api/ingest/{book_id}/status", ingest_status, methods=["GET"]),
         Route("/api/ingest/{book_id}/status/history", ingest_status_history, methods=["GET"]),
         Route("/api/chat", chat, methods=["POST"]),
+        Route("/api/books", list_books, methods=["GET"]),
+        Route("/api/books/{book_id}", delete_book, methods=["DELETE"]),
         # 静的フロント（最後にマウント。html=True で / に index.html を返す）
         Mount("/", app=StaticFiles(directory=STATIC_DIR, html=True), name="static"),
     ]
