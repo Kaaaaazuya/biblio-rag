@@ -8,6 +8,13 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+import pytest
+from starlette.testclient import TestClient
+
+from webui import server
+
+_client = TestClient(server.app)
+
 
 def _read_html(path: str) -> str:
     """HTML ファイルを読み込む。"""
@@ -71,3 +78,44 @@ def test_chat_html_no_unversioned_cdn_scripts():
             assert re.search(r"@\d+\.\d+", src_url), (
                 f"CDN スクリプトのバージョンが固定されていません: {src_url}"
             )
+
+
+def test_chat_html_marked_local_path_is_actually_served():
+    """chat.html が参照する marked のローカルパスが、実際に配信されることを確認する（Issue #36）。
+
+    StaticFiles は webui/static を "/" にマウントしているため、
+    webui/static/lib/marked.min.js の実際の配信パスは /lib/marked.min.js であり、
+    /static/lib/marked.min.js ではない。
+    """
+    html = _read_html("webui/static/chat.html")
+
+    marked_script_pattern = r'<script\s+[^>]*src\s*=\s*["\']([^"\']*marked[^"\']*)["\']'
+    match = re.search(marked_script_pattern, html)
+    assert match, "marked スクリプトタグが見つかりません"
+
+    src_url = match.group(1)
+    if not src_url.startswith("/"):
+        pytest.skip("CDN 参照のため配信パス検証は対象外")
+
+    response = _client.get(src_url)
+    assert response.status_code == 200, (
+        f"chat.html が参照する marked のパス {src_url} が実際には配信されていません"
+        f"（status={response.status_code}）"
+    )
+
+
+def test_marked_local_file_is_not_a_placeholder_stub():
+    """ローカル同梱した marked.min.js が実際に動作するライブラリであることを確認する（Issue #36）。
+
+    プレースホルダ的なスタブ（`marked.parse` を呼んでも何も返さない実装）ではなく、
+    実際の marked のコード（Tokenizer/Lexer/Parser 等の実装）を含んでいることを検証する。
+    """
+    content = Path("webui/static/lib/marked.min.js").read_text(encoding="utf-8")
+
+    assert "stub" not in content.lower(), "marked.min.js がプレースホルダのスタブのままです"
+    # 実物の marked は Tokenizer/Lexer/Parser の実装を含み、数十KB規模になる。
+    # スタブは 1KB 未満のごく短い内容だった。
+    assert len(content) > 10_000, (
+        f"marked.min.js の内容が短すぎます（{len(content)} bytes）。"
+        "実物のライブラリではない可能性があります"
+    )
