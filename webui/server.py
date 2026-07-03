@@ -334,14 +334,6 @@ def _validate_chat_input(body: dict) -> tuple[str | None, int]:
             422,
         )
 
-    total_chars = sum(len(str(msg.get("content", ""))) for msg in history if isinstance(msg, dict))
-    if total_chars > config.MAX_HISTORY_TOTAL_CHARS:
-        return (
-            f"history の合計文字数は最大 {config.MAX_HISTORY_TOTAL_CHARS} 文字までです"
-            f"（{total_chars} 文字）",
-            422,
-        )
-
     for i, msg in enumerate(history):
         if not isinstance(msg, dict):
             return (f"history[{i}] は辞書である必要があります", 422)
@@ -363,6 +355,15 @@ def _validate_chat_input(body: dict) -> tuple[str | None, int]:
 
         if not msg.get("content"):
             return (f"history[{i}] の content は空でない必要があります", 422)
+
+    # ここまでで history の各要素が dict かつ role/content を持つことが保証されている
+    total_chars = sum(len(str(msg["content"])) for msg in history)
+    if total_chars > config.MAX_HISTORY_TOTAL_CHARS:
+        return (
+            f"history の合計文字数は最大 {config.MAX_HISTORY_TOTAL_CHARS} 文字までです"
+            f"（{total_chars} 文字）",
+            422,
+        )
 
     return (None, 200)
 
