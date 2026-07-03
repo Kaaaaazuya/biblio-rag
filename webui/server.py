@@ -741,43 +741,51 @@ def delete_book(request: Request) -> JSONResponse:
 
     try:
         status_store = _get_status_store()
+    except Exception as e:  # noqa: BLE001
+        logger.error(f"Failed to open status store for book_id={book_id}: {e}", exc_info=True)
+        return JSONResponse({"detail": "Failed to delete book. Please try again."}, status_code=500)
+
+    try:
         try:
             current_status = status_store.get_current_status(book_id)
-        finally:
-            if status_store is not _status_store:
-                status_store.close()
-    except Exception as e:  # noqa: BLE001
-        logger.error(
-            f"Failed to check status before deleting book_id={book_id}: {e}", exc_info=True
-        )
-        return JSONResponse({"detail": "Failed to delete book. Please try again."}, status_code=500)
+        except Exception as e:  # noqa: BLE001
+            logger.error(
+                f"Failed to check status before deleting book_id={book_id}: {e}", exc_info=True
+            )
+            return JSONResponse(
+                {"detail": "Failed to delete book. Please try again."}, status_code=500
+            )
 
-    if current_status and current_status.get("status") in ("pending", "processing"):
-        return JSONResponse(
-            {"detail": "取り込み中の書籍は削除できません。完了してから再試行してください。"},
-            status_code=409,
-        )
+        if current_status and current_status.get("status") in ("pending", "processing"):
+            return JSONResponse(
+                {"detail": "取り込み中の書籍は削除できません。完了してから再試行してください。"},
+                status_code=409,
+            )
 
-    try:
-        store = PgVectorStore(config.database_url())
         try:
-            deleted_chunks = store.delete_book(book_id)
-        finally:
-            store.close()
-    except Exception as e:  # noqa: BLE001
-        logger.error(f"Failed to delete pgvector chunks for book_id={book_id}: {e}", exc_info=True)
-        return JSONResponse({"detail": "Failed to delete book. Please try again."}, status_code=500)
+            store = PgVectorStore(config.database_url())
+            try:
+                deleted_chunks = store.delete_book(book_id)
+            finally:
+                store.close()
+        except Exception as e:  # noqa: BLE001
+            logger.error(
+                f"Failed to delete pgvector chunks for book_id={book_id}: {e}", exc_info=True
+            )
+            return JSONResponse(
+                {"detail": "Failed to delete book. Please try again."}, status_code=500
+            )
 
-    # pgvector 削除後にステータス履歴も削除する（失敗しても致命的ではないためログのみ）
-    try:
-        status_store = _get_status_store()
+        # pgvector 削除後にステータス履歴も削除する（失敗しても致命的ではないためログのみ）
         try:
             status_store.delete_status(book_id)
-        finally:
-            if status_store is not _status_store:
-                status_store.close()
-    except Exception as e:  # noqa: BLE001
-        logger.error(f"Failed to delete status history for book_id={book_id}: {e}", exc_info=True)
+        except Exception as e:  # noqa: BLE001
+            logger.error(
+                f"Failed to delete status history for book_id={book_id}: {e}", exc_info=True
+            )
+    finally:
+        if status_store is not _status_store:
+            status_store.close()
 
     try:
         ObjectStore().delete_book_files(book_id)

@@ -87,16 +87,20 @@ class ObjectStore:
         return {k: unquote(raw[k]) for k in _META_KEYS if k in raw}
 
     def delete_book_files(self, book_id: str) -> None:
-        """book_id に紐づく raw/normalized/chunks の3ファイルを削除する。
+        """book_id に紐づく raw/normalized/chunks の3ファイルを一括削除する。
 
-        存在しないファイルを指定してもエラーにならない（S3 の delete_object は冪等）。
+        delete_objects でネットワークラウンドトリップを1回にまとめる。
+        存在しないファイルを指定してもエラーにならない（S3 の削除は冪等）。
         """
-        for key in (
+        keys = (
             f"{RAW_PREFIX}{book_id}.pdf",
             f"{NORMALIZED_PREFIX}{book_id}.md",
             f"{CHUNKS_PREFIX}{book_id}.jsonl",
-        ):
-            self.client.delete_object(Bucket=self.bucket, Key=key)
+        )
+        self.client.delete_objects(
+            Bucket=self.bucket,
+            Delete={"Objects": [{"Key": key} for key in keys]},
+        )
 
     def _resolve_key(self, key: str) -> str | None:
         """NFC 正規化で一致する実際の S3 キーを返す。完全一致を先に試みる。"""
