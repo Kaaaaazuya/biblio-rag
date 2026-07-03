@@ -2,7 +2,9 @@
 
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+
+_STANDARD_RECORD_ATTRS = frozenset(logging.makeLogRecord({}).__dict__)
 
 
 class JSONFormatter(logging.Formatter):
@@ -11,12 +13,16 @@ class JSONFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
         """Format a log record as a JSON string."""
         log_data = {
-            "timestamp": datetime.fromtimestamp(record.created, tz=timezone.utc).isoformat(),
+            "timestamp": datetime.fromtimestamp(record.created, tz=UTC).isoformat(),
             "level": record.levelname,
             "logger": record.name,
             "message": record.getMessage(),
         }
-        return json.dumps(log_data)
+        # logger.info(..., extra={"key": val}) で渡された追加コンテキストも含める
+        for key, value in record.__dict__.items():
+            if key not in _STANDARD_RECORD_ATTRS:
+                log_data[key] = value
+        return json.dumps(log_data, default=str)
 
 
 def configure_logging() -> None:

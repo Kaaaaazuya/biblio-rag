@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import json
 from collections.abc import AsyncIterator
-from unittest.mock import MagicMock, patch
 
 from starlette.testclient import TestClient
 
@@ -54,7 +53,7 @@ def _fake_llm(lines: list[str]):
     return _Client
 
 
-def _fake_retrieve(query: str, top_k: int) -> list[dict]:
+def _fake_retrieve(query: str, top_k: int, book_id: str | None = None) -> list[dict]:
     """テスト用の検索結果を返す。"""
     return [
         {
@@ -90,9 +89,9 @@ def test_chat_markdown_content_preservation_in_response(monkeypatch):
         "`コード` を含みます。\n\n- リスト\n",
         "- アイテム",
     ]
-    llm_output = [
-        json.dumps({"message": {"content": t}, "done": False}) for t in tokens
-    ] + [json.dumps({"done": True})]
+    llm_output = [json.dumps({"message": {"content": t}, "done": False}) for t in tokens] + [
+        json.dumps({"done": True})
+    ]
 
     monkeypatch.setattr("httpx.AsyncClient", _fake_llm(llm_output))
 
@@ -240,7 +239,7 @@ def test_chat_sources_event_contains_all_required_fields(monkeypatch):
 def test_chat_sources_with_missing_optional_fields(monkeypatch):
     """オプショナルフィールド（section など）が None の場合、正しく処理されることをテスト。"""
 
-    def fake_retrieve_minimal(query: str, top_k: int) -> list[dict]:
+    def fake_retrieve_minimal(query: str, top_k: int, book_id: str | None = None) -> list[dict]:
         return [
             {
                 "book_id": "book1",
@@ -309,7 +308,7 @@ def test_chat_retrieval_error_handling(monkeypatch, caplog):
     """
     import logging
 
-    def failing_retrieve(query: str, top_k: int):
+    def failing_retrieve(query: str, top_k: int, book_id: str | None = None):
         raise ValueError("検索インデックスが破損しています")
 
     monkeypatch.setattr(server, "_retrieve", failing_retrieve)

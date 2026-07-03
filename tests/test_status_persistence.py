@@ -8,8 +8,7 @@ Verifies that:
 
 from __future__ import annotations
 
-from datetime import datetime
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 from starlette.testclient import TestClient
@@ -44,9 +43,7 @@ class TestStatusPersistence:
         assert response.status_code == 200
         assert response.json()["status"] == "pending"
         # Verify status was persisted (not just in-memory)
-        mock_store.set_status.assert_called_once_with(
-            "test_book_1", "pending", error_msg=None
-        )
+        mock_store.set_status.assert_called_once_with("test_book_1", "pending", error_msg=None)
 
     def test_status_retrieval_from_persistent_store(self, client, monkeypatch):
         """Status is retrieved from persistent store, not in-memory dict."""
@@ -107,7 +104,7 @@ class TestStatusPersistence:
         assert response.status_code == 200
         data = response.json()
         assert data["status"] == "failed"
-        assert data["error_msg"] == "PDF extraction failed: corrupt file"
+        assert data["error"] == "PDF extraction failed: corrupt file"
 
     def test_historical_status_retrieval(self, monkeypatch):
         """Retrieve historical status transitions for a book."""
@@ -178,11 +175,13 @@ class TestStatusPersistence:
             "updated_at": "2026-07-02T12:00:00Z",
         }
         monkeypatch.setattr(server, "_status_store", mock_store)
+        # パイプライン本体は呼ばずにステータス遷移だけ確認
+        monkeypatch.setattr(server, "_run_pipeline", lambda book_id: None)
 
         client = TestClient(server.app)
 
         # Simulate multiple concurrent requests updating status
-        for i in range(3):
+        for _ in range(3):
             client.post(
                 "/api/ingest",
                 json={"book_id": "concurrent_book"},

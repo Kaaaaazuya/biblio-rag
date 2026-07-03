@@ -17,7 +17,7 @@ import contextlib
 import json
 import logging
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import quote
 
@@ -273,7 +273,7 @@ def _validate_chat_input(body: dict) -> tuple[str | None, int]:
         top_k = int(body.get("top_k", 5))
         if top_k < 1 or top_k > 100:
             return ("top_k は 1～100 の範囲で指定してください", 422)
-    except (ValueError, TypeError):
+    except (ValueError, TypeError):  # fmt: skip
         return ("top_k は整数である必要があります", 422)
 
     # history の検証
@@ -382,8 +382,7 @@ async def chat(request: Request) -> StreamingResponse | JSONResponse:
                     if err := data.get("error"):
                         logger.error(f"Ollama error: {err}")
                         error_msg = (
-                            "An error occurred while generating a response. "
-                            "Please try again."
+                            "An error occurred while generating a response. Please try again."
                         )
                         msg = json.dumps(
                             {
@@ -562,23 +561,25 @@ def ingest_status(request: Request) -> JSONResponse:
             if status_record:
                 updated_at = status_record.get("updated_at")
                 updated_at_str = (
-                    updated_at.isoformat()
-                    if isinstance(updated_at, datetime)
-                    else updated_at
+                    updated_at.isoformat() if isinstance(updated_at, datetime) else updated_at
                 )
-                return JSONResponse({
-                    "status": status_record.get("status", "unknown"),
-                    "chunks_processed": status_record.get("chunks_processed", 0),
-                    "error": status_record.get("error_msg"),
-                    "updated_at": updated_at_str,
-                })
+                return JSONResponse(
+                    {
+                        "status": status_record.get("status", "unknown"),
+                        "chunks_processed": status_record.get("chunks_processed", 0),
+                        "error": status_record.get("error_msg"),
+                        "updated_at": updated_at_str,
+                    }
+                )
             else:
-                return JSONResponse({
-                    "status": "unknown",
-                    "chunks_processed": 0,
-                    "error": None,
-                    "updated_at": None,
-                })
+                return JSONResponse(
+                    {
+                        "status": "unknown",
+                        "chunks_processed": 0,
+                        "error": None,
+                        "updated_at": None,
+                    }
+                )
         finally:
             if store is not _status_store:
                 store.close()
@@ -607,9 +608,7 @@ def ingest_status_history(request: Request) -> JSONResponse:
                     "chunks_processed": record.get("chunks_processed", 0),
                     "error": record.get("error_msg"),
                     "created_at": (
-                        created_at.isoformat()
-                        if isinstance(created_at, datetime)
-                        else created_at
+                        created_at.isoformat() if isinstance(created_at, datetime) else created_at
                     ),
                 }
 
@@ -624,7 +623,6 @@ def ingest_status_history(request: Request) -> JSONResponse:
             {"detail": "Failed to retrieve status history. Please try again."},
             status_code=500,
         )
-
 
 
 def check_database_connectivity() -> bool:
@@ -665,7 +663,7 @@ def health(request: Request) -> JSONResponse:
             "db": "ok" if db_ok else "unreachable",
             "embedding": "ok" if embedding_ok else "unreachable",
         },
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
     }
 
     return JSONResponse(response, status_code=status_code)

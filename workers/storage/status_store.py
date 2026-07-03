@@ -6,8 +6,6 @@ Provides interface for tracking status transitions and maintaining historical re
 
 from __future__ import annotations
 
-from datetime import datetime
-
 import psycopg
 from psycopg.rows import dict_row
 
@@ -40,16 +38,15 @@ class StatusStore:
             status: Current status ('pending', 'processing', 'completed', 'failed')
             error_msg: Optional error message if status is 'failed'
         """
-        with self.conn.transaction():
-            with self.conn.cursor() as cur:
-                cur.execute(
-                    """
+        with self.conn.transaction(), self.conn.cursor() as cur:
+            cur.execute(
+                """
                     INSERT INTO ingestion_status
                         (book_id, status, error_msg, created_at, updated_at)
                     VALUES (%(book_id)s, %(status)s, %(error_msg)s, now(), now())
                     """,
-                    {"book_id": book_id, "status": status, "error_msg": error_msg},
-                )
+                {"book_id": book_id, "status": status, "error_msg": error_msg},
+            )
 
     def get_current_status(self, book_id: str) -> dict | None:
         """Get the most recent status for a book.
@@ -61,19 +58,18 @@ class StatusStore:
             Dict with keys: book_id, status, chunks_processed, error_msg, updated_at
             Returns None if no status found for this book
         """
-        with self.conn.transaction():
-            with self.conn.cursor(row_factory=dict_row) as cur:
-                cur.execute(
-                    """
+        with self.conn.transaction(), self.conn.cursor(row_factory=dict_row) as cur:
+            cur.execute(
+                """
                     SELECT book_id, status, chunks_processed, error_msg, updated_at
                     FROM ingestion_status
                     WHERE book_id = %(book_id)s
                     ORDER BY created_at DESC
                     LIMIT 1
                     """,
-                    {"book_id": book_id},
-                )
-                return cur.fetchone()
+                {"book_id": book_id},
+            )
+            return cur.fetchone()
 
     def get_status_history(self, book_id: str) -> list[dict]:
         """Get all status transitions for a book in chronological order.
@@ -84,18 +80,17 @@ class StatusStore:
         Returns:
             List of dicts with keys: book_id, status, chunks_processed, error_msg, created_at
         """
-        with self.conn.transaction():
-            with self.conn.cursor(row_factory=dict_row) as cur:
-                cur.execute(
-                    """
+        with self.conn.transaction(), self.conn.cursor(row_factory=dict_row) as cur:
+            cur.execute(
+                """
                     SELECT book_id, status, chunks_processed, error_msg, created_at
                     FROM ingestion_status
                     WHERE book_id = %(book_id)s
                     ORDER BY created_at ASC
                     """,
-                    {"book_id": book_id},
-                )
-                return cur.fetchall()
+                {"book_id": book_id},
+            )
+            return cur.fetchall()
 
     def close(self) -> None:
         """Close database connection."""

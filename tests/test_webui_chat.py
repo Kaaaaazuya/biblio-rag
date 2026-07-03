@@ -225,8 +225,9 @@ def test_chat_sse_ollama_error_event(monkeypatch, caplog):
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-def test_run_pipeline_success():
-    server._status.clear()
+def test_run_pipeline_success(monkeypatch):
+    mock_store = MagicMock()
+    monkeypatch.setattr(server, "_status_store", mock_store)
 
     fake_obj_store = MagicMock()
     fake_obj_store.get_bytes.return_value = b"pdf-content"
@@ -245,14 +246,15 @@ def test_run_pipeline_success():
         ]
         server._run_pipeline("pipeline-test")
 
-    assert server._status["pipeline-test"]["status"] == "done"
+    mock_store.set_status.assert_any_call("pipeline-test", "completed", error_msg=None)
 
 
-def test_run_pipeline_sets_failed_on_error(caplog):
+def test_run_pipeline_sets_failed_on_error(monkeypatch, caplog):
     """パイプラインエラーは詳細情報を返さず、汎用メッセージを返す。"""
     import logging
 
-    server._status.clear()
+    mock_store = MagicMock()
+    monkeypatch.setattr(server, "_status_store", mock_store)
 
     with (
         caplog.at_level(logging.ERROR),
@@ -260,10 +262,11 @@ def test_run_pipeline_sets_failed_on_error(caplog):
     ):
         server._run_pipeline("fail-test")
 
-    assert server._status["fail-test"]["status"] == "failed"
+    failed_call = next(c for c in mock_store.set_status.call_args_list if c.args[1] == "failed")
+    error_msg = failed_call.kwargs["error_msg"]
     # 内部情報（接続失敗）はステータスに含めない
-    assert "接続失敗" not in server._status["fail-test"]["error"]
-    assert "An error occurred" in server._status["fail-test"]["error"]
+    assert "接続失敗" not in error_msg
+    assert "An error occurred" in error_msg
     # ログには記録
     assert any("接続失敗" in record.message for record in caplog.records)
 

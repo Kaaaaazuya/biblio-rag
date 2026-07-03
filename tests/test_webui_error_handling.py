@@ -119,9 +119,10 @@ def test_chat_connection_error_returns_generic_message(caplog, monkeypatch):
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-def test_run_pipeline_error_logs_details_not_exposed_in_status(caplog):
+def test_run_pipeline_error_logs_details_not_exposed_in_status(monkeypatch, caplog):
     """パイプラインエラーが発生した場合、詳細情報はログのみ、ステータスには汎用メッセージ。"""
-    server._status.clear()
+    mock_store = MagicMock()
+    monkeypatch.setattr(server, "_status_store", mock_store)
 
     error_detail = "connection to localhost:5432 refused"
     with (
@@ -130,12 +131,12 @@ def test_run_pipeline_error_logs_details_not_exposed_in_status(caplog):
     ):
         server._run_pipeline("error-test")
 
-    status = server._status["error-test"]
-    assert status["status"] == "failed"
+    failed_call = next(c for c in mock_store.set_status.call_args_list if c.args[1] == "failed")
+    error_msg = failed_call.kwargs["error_msg"]
     # 内部情報（localhost:5432）はステータスに含めない
-    assert "localhost" not in status["error"]
-    assert "5432" not in status["error"]
+    assert "localhost" not in error_msg
+    assert "5432" not in error_msg
     # 汎用メッセージのみ
-    assert "An error occurred while processing" in status["error"]
+    assert "An error occurred while processing" in error_msg
     # ログには詳細情報を記録
     assert any(error_detail in record.message for record in caplog.records)

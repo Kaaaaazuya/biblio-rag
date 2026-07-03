@@ -39,46 +39,24 @@ class TestStructuredLogging:
         assert "logger" in log_data
 
     def test_structured_logging_includes_context(self):
-        """Test that structured logging can include contextual information."""
+        """Test that the application's JSONFormatter includes extra context fields."""
+        from webui.logging_config import JSONFormatter
+
         log_stream = StringIO()
         handler = logging.StreamHandler(log_stream)
-
-        test_logger = logging.getLogger("test_context")
-        test_logger.handlers = []
-        test_logger.addHandler(handler)
-        test_logger.setLevel(logging.INFO)
-
-        # Custom formatter that includes extra fields
-        class JSONFormatter(logging.Formatter):
-            def format(self, record):
-                log_record = {
-                    "timestamp": self.formatTime(record),
-                    "level": record.levelname,
-                    "message": record.getMessage(),
-                    "logger": record.name,
-                }
-                if hasattr(record, "extra_field"):
-                    log_record["extra_field"] = record.extra_field
-                return json.dumps(log_record)
-
         handler.setFormatter(JSONFormatter())
 
-        # Create a log record with extra context
-        record = test_logger.makeRecord(
-            "test_context",
-            logging.INFO,
-            "test.py",
-            1,
-            "Test message",
-            (),
-            None,
-        )
-        record.extra_field = "context_value"
-        handler.emit(record)
+        test_logger = logging.getLogger("test_context")
+        test_logger.handlers = [handler]
+        test_logger.setLevel(logging.INFO)
+
+        # logger.info(..., extra={...}) で渡した追加コンテキストが JSON に含まれること
+        test_logger.info("Test message", extra={"extra_field": "context_value"})
 
         log_output = log_stream.getvalue().strip()
         log_data = json.loads(log_output)
         assert log_data["extra_field"] == "context_value"
+        assert log_data["message"] == "Test message"
 
 
 class TestHealthCheckEndpoint:
@@ -91,16 +69,20 @@ class TestHealthCheckEndpoint:
 
     def test_health_endpoint_exists(self, client):
         """Test that the /api/health endpoint returns 200."""
-        with patch("webui.server.check_database_connectivity", return_value=True):
-            with patch("webui.server.check_embedding_service", return_value=True):
-                response = client.get("/api/health")
+        with (
+            patch("webui.server.check_database_connectivity", return_value=True),
+            patch("webui.server.check_embedding_service", return_value=True),
+        ):
+            response = client.get("/api/health")
         assert response.status_code == 200
 
     def test_health_endpoint_json_response(self, client):
         """Test that /api/health returns JSON with status and services."""
-        with patch("webui.server.check_database_connectivity", return_value=True):
-            with patch("webui.server.check_embedding_service", return_value=True):
-                response = client.get("/api/health")
+        with (
+            patch("webui.server.check_database_connectivity", return_value=True),
+            patch("webui.server.check_embedding_service", return_value=True),
+        ):
+            response = client.get("/api/health")
 
         data = response.json()
         assert "status" in data
@@ -110,9 +92,11 @@ class TestHealthCheckEndpoint:
 
     def test_health_endpoint_all_services_ok(self, client):
         """Test health check when all services are healthy."""
-        with patch("webui.server.check_database_connectivity", return_value=True):
-            with patch("webui.server.check_embedding_service", return_value=True):
-                response = client.get("/api/health")
+        with (
+            patch("webui.server.check_database_connectivity", return_value=True),
+            patch("webui.server.check_embedding_service", return_value=True),
+        ):
+            response = client.get("/api/health")
 
         data = response.json()
         assert response.status_code == 200
@@ -122,9 +106,11 @@ class TestHealthCheckEndpoint:
 
     def test_health_endpoint_db_unhealthy(self, client):
         """Test health check when database is unavailable."""
-        with patch("webui.server.check_database_connectivity", return_value=False):
-            with patch("webui.server.check_embedding_service", return_value=True):
-                response = client.get("/api/health")
+        with (
+            patch("webui.server.check_database_connectivity", return_value=False),
+            patch("webui.server.check_embedding_service", return_value=True),
+        ):
+            response = client.get("/api/health")
 
         data = response.json()
         assert response.status_code == 503
@@ -134,9 +120,11 @@ class TestHealthCheckEndpoint:
 
     def test_health_endpoint_embedding_unhealthy(self, client):
         """Test health check when embedding service is unavailable."""
-        with patch("webui.server.check_database_connectivity", return_value=True):
-            with patch("webui.server.check_embedding_service", return_value=False):
-                response = client.get("/api/health")
+        with (
+            patch("webui.server.check_database_connectivity", return_value=True),
+            patch("webui.server.check_embedding_service", return_value=False),
+        ):
+            response = client.get("/api/health")
 
         data = response.json()
         assert response.status_code == 503
@@ -146,9 +134,11 @@ class TestHealthCheckEndpoint:
 
     def test_health_endpoint_both_unhealthy(self, client):
         """Test health check when all services are unavailable."""
-        with patch("webui.server.check_database_connectivity", return_value=False):
-            with patch("webui.server.check_embedding_service", return_value=False):
-                response = client.get("/api/health")
+        with (
+            patch("webui.server.check_database_connectivity", return_value=False),
+            patch("webui.server.check_embedding_service", return_value=False),
+        ):
+            response = client.get("/api/health")
 
         data = response.json()
         assert response.status_code == 503
@@ -158,9 +148,11 @@ class TestHealthCheckEndpoint:
 
     def test_health_endpoint_has_timestamp(self, client):
         """Test that health endpoint includes a timestamp."""
-        with patch("webui.server.check_database_connectivity", return_value=True):
-            with patch("webui.server.check_embedding_service", return_value=True):
-                response = client.get("/api/health")
+        with (
+            patch("webui.server.check_database_connectivity", return_value=True),
+            patch("webui.server.check_embedding_service", return_value=True),
+        ):
+            response = client.get("/api/health")
 
         data = response.json()
         assert "timestamp" in data
