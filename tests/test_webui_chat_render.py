@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import socket
 import subprocess
+import sys
 import time
 
 import httpx
@@ -30,9 +31,9 @@ def server():
     port = _free_port()
     base = f"http://127.0.0.1:{port}"
     proc = subprocess.Popen(
-        ["uv", "run", "uvicorn", "webui.server:app", "--port", str(port)],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
+        [sys.executable, "-m", "uvicorn", "webui.server:app", "--port", str(port)],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
     )
     try:
         for _ in range(100):
