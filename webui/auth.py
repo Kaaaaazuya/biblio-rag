@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import secrets
 
 from starlette.datastructures import Headers
 from starlette.responses import JSONResponse
@@ -35,30 +36,42 @@ def _extract_basic_auth(auth_header: str | None) -> tuple[str, str] | None:
         decoded = base64.b64decode(parts[1]).decode("utf-8")
         username, password = decoded.split(":", 1)
         return (username, password)
-    except ValueError, UnicodeDecodeError:
+    except ValueError:
+        # UnicodeDecodeError は ValueError のサブクラスのため単独で捕捉できる
         return None
 
 
 def _verify_token_auth(token: str) -> bool:
-    """トークン認証で受け取ったトークンを検証。"""
-    return config.WEBUI_AUTH_TOKEN and token == config.WEBUI_AUTH_TOKEN
+    """トークン認証で受け取ったトークンを検証（タイミング攻撃対策済み）。"""
+    if not config.WEBUI_AUTH_TOKEN:
+        return False
+    return secrets.compare_digest(token, config.WEBUI_AUTH_TOKEN)
 
 
 def _verify_basic_auth(username: str, password: str) -> bool:
-    """Basic認証で受け取ったユーザー名・パスワードを検証。"""
-    return (
-        config.WEBUI_AUTH_USERNAME
-        and config.WEBUI_AUTH_PASSWORD
-        and username == config.WEBUI_AUTH_USERNAME
-        and password == config.WEBUI_AUTH_PASSWORD
+    """Basic認証で受け取ったユーザー名・パスワードを検証（タイミング攻撃対策済み）。"""
+    if not config.WEBUI_AUTH_USERNAME or not config.WEBUI_AUTH_PASSWORD:
+        return False
+    return secrets.compare_digest(username, config.WEBUI_AUTH_USERNAME) and secrets.compare_digest(
+        password, config.WEBUI_AUTH_PASSWORD
     )
 
 
 def _is_protected_path(path: str) -> bool:
-    """パスが認証保護対象かを判定。完全一致またはスラッシュ境界での前方一致のみ許可。"""
+    """パスが認証保護対象かを判定。完全一致またはスラッシュ境界での前方一致のみ許可。
+
+    WEBUI_AUTH_METHOD=token の場合、ブラウザは静的ファイル読み込み時に
+    Authorization ヘッダを自動送信しないため、/api/ 以外は保護対象外とする
+    （token 認証は API 保護が主目的）。basic 認証はブラウザが認証ダイアログを
+    出せるため、静的ファイルも含めて全体を保護する。
+    """
     for unprotected in UNPROTECTED_PATHS:
         if path == unprotected or path.startswith(unprotected + "/"):
             return False
+
+    if config.WEBUI_AUTH_METHOD == "token":
+        return path.startswith("/api/")
+
     return True
 
 
