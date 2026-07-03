@@ -246,7 +246,9 @@ def test_run_pipeline_success(monkeypatch):
         ]
         server._run_pipeline("pipeline-test")
 
-    mock_store.set_status.assert_any_call("pipeline-test", "completed", error_msg=None)
+    mock_store.set_status.assert_any_call(
+        "pipeline-test", "completed", error_msg=None, chunks_processed=1
+    )
 
 
 def test_run_pipeline_sets_failed_on_error(monkeypatch, caplog):

@@ -43,7 +43,9 @@ class TestStatusPersistence:
         assert response.status_code == 200
         assert response.json()["status"] == "pending"
         # Verify status was persisted (not just in-memory)
-        mock_store.set_status.assert_called_once_with("test_book_1", "pending", error_msg=None)
+        mock_store.set_status.assert_called_once_with(
+            "test_book_1", "pending", error_msg=None, chunks_processed=0
+        )
 
     def test_status_retrieval_from_persistent_store(self, client, monkeypatch):
         """Status is retrieved from persistent store, not in-memory dict."""
@@ -163,7 +165,7 @@ class TestStatusPersistence:
         # Simulate that store handles concurrent updates atomically
         call_count = [0]
 
-        def mock_set_status(book_id, status, error_msg=None):
+        def mock_set_status(book_id, status, error_msg=None, chunks_processed=0):
             call_count[0] += 1
 
         mock_store.set_status.side_effect = mock_set_status
@@ -189,7 +191,9 @@ class TestStatusPersistence:
 
         # All requests should succeed, and store should handle them
         assert call_count[0] == 3
-        mock_store.set_status.assert_called_with("concurrent_book", "pending", error_msg=None)
+        mock_store.set_status.assert_called_with(
+            "concurrent_book", "pending", error_msg=None, chunks_processed=0
+        )
 
     def test_unknown_status_returns_default(self, client, monkeypatch):
         """Unknown book_id returns 'unknown' status."""
@@ -215,16 +219,24 @@ class TestStatusPersistence:
 
         # Simulate pipeline calling _set_status at each stage
         server._set_status("prog_book", "extracting")
-        mock_store.set_status.assert_called_with("prog_book", "extracting", error_msg=None)
+        mock_store.set_status.assert_called_with(
+            "prog_book", "extracting", error_msg=None, chunks_processed=0
+        )
 
         server._set_status("prog_book", "chunking")
-        mock_store.set_status.assert_called_with("prog_book", "chunking", error_msg=None)
+        mock_store.set_status.assert_called_with(
+            "prog_book", "chunking", error_msg=None, chunks_processed=0
+        )
 
         server._set_status("prog_book", "embedding")
-        mock_store.set_status.assert_called_with("prog_book", "embedding", error_msg=None)
+        mock_store.set_status.assert_called_with(
+            "prog_book", "embedding", error_msg=None, chunks_processed=0
+        )
 
         server._set_status("prog_book", "completed")
-        mock_store.set_status.assert_called_with("prog_book", "completed", error_msg=None)
+        mock_store.set_status.assert_called_with(
+            "prog_book", "completed", error_msg=None, chunks_processed=0
+        )
 
         # Verify all calls were made
         assert mock_store.set_status.call_count == 4
@@ -237,4 +249,6 @@ class TestStatusPersistence:
         error_msg = "PDF extraction failed: Invalid file format"
         server._set_status("failed_book", "failed", error=error_msg)
 
-        mock_store.set_status.assert_called_with("failed_book", "failed", error_msg=error_msg)
+        mock_store.set_status.assert_called_with(
+            "failed_book", "failed", error_msg=error_msg, chunks_processed=0
+        )

@@ -30,22 +30,35 @@ class StatusStore:
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
         self.close()
 
-    def set_status(self, book_id: str, status: str, error_msg: str | None = None) -> None:
+    def set_status(
+        self,
+        book_id: str,
+        status: str,
+        error_msg: str | None = None,
+        chunks_processed: int = 0,
+    ) -> None:
         """Record ingestion status for a book.
 
         Args:
             book_id: Identifier for the book being ingested
             status: Current status ('pending', 'processing', 'completed', 'failed')
             error_msg: Optional error message if status is 'failed'
+            chunks_processed: Number of chunks processed so far
         """
         with self.conn.transaction(), self.conn.cursor() as cur:
             cur.execute(
                 """
                     INSERT INTO ingestion_status
-                        (book_id, status, error_msg, created_at, updated_at)
-                    VALUES (%(book_id)s, %(status)s, %(error_msg)s, now(), now())
+                        (book_id, status, error_msg, chunks_processed, created_at, updated_at)
+                    VALUES
+                        (%(book_id)s, %(status)s, %(error_msg)s, %(chunks_processed)s, now(), now())
                     """,
-                {"book_id": book_id, "status": status, "error_msg": error_msg},
+                {
+                    "book_id": book_id,
+                    "status": status,
+                    "error_msg": error_msg,
+                    "chunks_processed": chunks_processed,
+                },
             )
 
     def get_current_status(self, book_id: str) -> dict | None:

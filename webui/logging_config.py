@@ -26,12 +26,17 @@ class JSONFormatter(logging.Formatter):
 
 
 def configure_logging() -> None:
-    """Configure structured JSON logging for the application."""
-    formatter = JSONFormatter()
-    handler = logging.StreamHandler()
-    handler.setFormatter(formatter)
+    """Configure structured JSON logging for the application.
 
-    # Configure root logger
+    pytest の caplog など、既存のハンドラー（テスト用ログキャプチャ等）を
+    壊さないよう、置き換えではなく追加する。多重初期化を避けるため、
+    JSONFormatter 済みのハンドラーが既にあれば何もしない。
+    """
     root_logger = logging.getLogger()
-    root_logger.handlers = [handler]
+    if any(isinstance(h.formatter, JSONFormatter) for h in root_logger.handlers):
+        return
+
+    handler = logging.StreamHandler()
+    handler.setFormatter(JSONFormatter())
+    root_logger.addHandler(handler)
     root_logger.setLevel(logging.INFO)

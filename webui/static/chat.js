@@ -262,12 +262,15 @@ async function sendMessage() {
   } catch (err) {
     spinner.remove();
     // Handle abort separately
+    bubble.dataset.error = "1";
     if (err.name === "AbortError") {
-      bubble.dataset.error = "1";
-      bubble.textContent = fullContent || "📍 キャンセルされました";
+      bubble.textContent = fullContent
+        ? `${fullContent}\n\n📍 キャンセルされました`
+        : "📍 キャンセルされました";
     } else {
-      bubble.dataset.error = "1";
-      bubble.textContent = fullContent || "⚠ エラーが発生しました";
+      bubble.textContent = fullContent
+        ? `${fullContent}\n\n⚠ エラーが発生しました`
+        : "⚠ エラーが発生しました";
     }
     scrollBottom();
   } finally {

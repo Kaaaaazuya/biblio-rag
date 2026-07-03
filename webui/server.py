@@ -30,9 +30,11 @@ from starlette.responses import JSONResponse, StreamingResponse
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
+from webui.logging_config import configure_logging
 from workers import config
 from workers.storage import RAW_PREFIX, StatusStore
 
+configure_logging()
 logger = logging.getLogger(__name__)
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -58,12 +60,14 @@ def _get_status_store() -> StatusStore:
     return StatusStore(config.database_url())
 
 
-def _set_status(book_id: str, status: str, error: str | None = None) -> None:
+def _set_status(
+    book_id: str, status: str, error: str | None = None, chunks_processed: int = 0
+) -> None:
     """Record ingestion status to persistent storage."""
     try:
         store = _get_status_store()
         try:
-            store.set_status(book_id, status, error_msg=error)
+            store.set_status(book_id, status, error_msg=error, chunks_processed=chunks_processed)
         finally:
             if store is not _status_store:
                 store.close()
@@ -98,7 +102,7 @@ def _run_pipeline(book_id: str) -> None:
         finally:
             vec_store.close()
 
-        _set_status(book_id, "completed")
+        _set_status(book_id, "completed", chunks_processed=len(records))
     except Exception as e:  # noqa: BLE001
         logger.error(f"Pipeline failed for book_id={book_id}: {e}", exc_info=True)
         _set_status(book_id, "failed", "An error occurred while processing. Please try again.")
