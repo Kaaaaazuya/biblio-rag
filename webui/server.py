@@ -328,6 +328,12 @@ def _validate_chat_input(body: dict) -> tuple[str | None, int]:
     if not isinstance(history, list):
         return ("history はリストである必要があります", 422)
 
+    if len(history) > config.MAX_HISTORY_MESSAGES:
+        return (
+            f"history は最大 {config.MAX_HISTORY_MESSAGES} 件までです（{len(history)} 件）",
+            422,
+        )
+
     for i, msg in enumerate(history):
         if not isinstance(msg, dict):
             return (f"history[{i}] は辞書である必要があります", 422)
@@ -350,12 +356,24 @@ def _validate_chat_input(body: dict) -> tuple[str | None, int]:
         if not msg.get("content"):
             return (f"history[{i}] の content は空でない必要があります", 422)
 
+    # ここまでで history の各要素が dict かつ role/content を持つことが保証されている
+    total_chars = sum(len(str(msg["content"])) for msg in history)
+    if total_chars > config.MAX_HISTORY_TOTAL_CHARS:
+        return (
+            f"history の合計文字数は最大 {config.MAX_HISTORY_TOTAL_CHARS} 文字までです"
+            f"（{total_chars} 文字）",
+            422,
+        )
+
     return (None, 200)
 
 
 async def chat(request: Request) -> StreamingResponse | JSONResponse:
     """RAG チャット: クエリ埋め込み → pgvector 検索 → Ollama 生成（SSE ストリーム）。"""
-    body = await request.json()
+    try:
+        body = await request.json()
+    except json.JSONDecodeError:
+        return JSONResponse({"detail": "リクエストボディが不正なJSONです"}, status_code=400)
 
     # 入力検証
     error_msg, status_code = _validate_chat_input(body)

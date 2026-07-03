@@ -158,8 +158,9 @@ PDF・書名・著者を入力 → `raw/<file>.pdf` が S3 に作られ、書誌
 - ページ右上でペルソナ（優しい先輩 / 厳しい先生 / やさしく説明）・言語（日本語 / English）・**対象書籍**（全書籍 or 書籍単位で絞り込み）を切替可
 - 生成中断ボタン（AbortController）でストリーミングをキャンセル可能
 - 回答の根拠チャンクを「ソース」チップで表示。クリックで原文モーダルを開く
-- 会話履歴を localStorage に保持（ページリロード後も復元）
-- Markdown レンダリング対応（marked.js、DOMPurify でサニタイズ）
+- 会話履歴を localStorage に保持（ページリロード後も Markdown 表示ごと復元）
+- Markdown レンダリング対応（marked.js、DOMPurify でサニタイズ。いずれもローカル同梱）
+- 会話履歴には件数・合計文字数の上限あり（`MAX_HISTORY_MESSAGES`/`MAX_HISTORY_TOTAL_CHARS`。超過時は 422）
 - **検索精度改善フラグ**（すべてオプション・`.env` で有効化。詳細は [ADR 0013](docs/adr/0013-rag-precision-improvements.md)）:
   - `RERANK_ENABLED`: クロスエンコーダ（`bge-reranker-v2-m3`）で候補 `RERANK_CANDIDATE_K`（デフォルト 20）件から上位 top_k 件を再スコアリング
   - `HYBRID_ENABLED`: pg_bigm キーワード検索と RRF 融合
