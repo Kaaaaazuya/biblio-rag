@@ -18,5 +18,6 @@
 | [0012](0012-chat-webui.md) | 最小 RAG チャット UI の追加（Ollama + SSE） | Accepted |
 | [0013](0013-rag-precision-improvements.md) | RAG 精度改善: Rerank / Hybrid / HyDE / Citation | Accepted |
 | [0014](0014-eval-search-metrics.md) | 検索精度の評価基盤: hit@k / MRR + fixture クエリセット | Accepted |
+| [0015](0015-zero-cost-deployment.md) | 無課金デプロイ構成の決定（ベクトルDBのみNeon、他はAWS＝Bedrock/Lambda/S3） | Accepted |
 
 0001〜0006 は既存 Design Doc の決定を ADR 化したもの。
