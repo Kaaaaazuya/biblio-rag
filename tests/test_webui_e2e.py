@@ -111,6 +111,9 @@ def test_chat_ui_xss_sanitization_dompurify_loaded():
     """chat.html に DOMPurify が正しく読み込まれていることを確認。
 
     XSS 脆弱性対策: DOMPurify ライブラリが HTML に含まれていることを検証。
+
+    ローカル同梱（Issue #37）のため SRI は不要（marked と同じ扱い）。
+    CDN 参照に戻す場合は SRI 属性が必須になる。
     """
     from pathlib import Path
 
@@ -120,8 +123,7 @@ def test_chat_ui_xss_sanitization_dompurify_loaded():
     # DOMPurify スクリプトタグが含まれていることを確認
     assert "dompurify" in content.lower(), "DOMPurify が chat.html に読み込まれていない"
     assert "purify.min.js" in content, "DOMPurify の最小化版が読み込まれていない"
-    # SRI（Subresource Integrity）が設定されていることを確認
-    assert "integrity=" in content, "DOMPurify に SRI が設定されていない"
+    assert '"/lib/purify.min.js"' in content, "DOMPurify がローカル同梱パスから読み込まれていない"
 
 
 def test_chat_html_has_book_select():

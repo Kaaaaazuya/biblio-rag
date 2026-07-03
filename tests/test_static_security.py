@@ -104,6 +104,41 @@ def test_chat_html_marked_local_path_is_actually_served():
     )
 
 
+def test_chat_html_dompurify_local_path_is_actually_served():
+    """chat.html が参照する DOMPurify のローカルパスが実際に配信されることを確認する（Issue #37）。
+
+    従来 CDN + SRI で読み込んでいたが、SRI ハッシュが実ファイルと一致しておらず
+    ブラウザ側で読み込みがブロックされていた（整合性検証で発覚）。marked と同様に
+    ローカル同梱へ切り替えたため、参照パスが実配信パスと一致することを検証する。
+    """
+    html = _read_html("webui/static/chat.html")
+
+    purify_script_pattern = r'<script\s+[^>]*src\s*=\s*["\']([^"\']*purify[^"\']*)["\']'
+    match = re.search(purify_script_pattern, html)
+    assert match, "DOMPurify スクリプトタグが見つかりません"
+
+    src_url = match.group(1)
+    if not src_url.startswith("/"):
+        pytest.skip("CDN 参照のため配信パス検証は対象外")
+
+    response = _client.get(src_url)
+    assert response.status_code == 200, (
+        f"chat.html が参照する DOMPurify のパス {src_url} が実際には配信されていません"
+        f"（status={response.status_code}）"
+    )
+
+
+def test_dompurify_local_file_is_not_a_placeholder_stub():
+    """ローカル同梱した DOMPurify が実際に動作するライブラリであることを確認する（Issue #37）。"""
+    content = Path("webui/static/lib/purify.min.js").read_text(encoding="utf-8")
+
+    assert "stub" not in content.lower(), "purify.min.js がプレースホルダのスタブのままです"
+    assert len(content) > 10_000, (
+        f"purify.min.js の内容が短すぎます（{len(content)} bytes）。"
+        "実物のライブラリではない可能性があります"
+    )
+
+
 def test_marked_local_file_is_not_a_placeholder_stub():
     """ローカル同梱した marked.min.js が実際に動作するライブラリであることを確認する（Issue #36）。
 
