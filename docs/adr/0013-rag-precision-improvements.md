@@ -27,6 +27,8 @@ Zenn 記事を参考に、実装コストと精度改善効果のバランスが
 | `HYBRID_ENABLED` | ベクトル + キーワード RRF 融合 | false |
 | `HYDE_ENABLED` | 仮説回答文でクエリを書き換え | false |
 | `CITATION_ENABLED` | 回答内に引用番号を付与 | false |
+| `SCORE_THRESHOLD_ENABLED` | スコア閾値未満のチャンクを除外 | false |
+| `ADJACENT_CHUNK_ENABLED` | ヒットチャンクの前後を追加取得 | false |
 
 ### 検索フロー（`_retrieve` 内）
 
@@ -35,8 +37,10 @@ query
   ↓ [HYDE_ENABLED]    Ollama で仮説回答を生成 → 仮説文をベクトル化
   ↓                   embed（bge-m3）
   ↓                   pgvector ベクトル検索（候補 RERANK_CANDIDATE_K=20 件）
+  ↓ [SCORE_THRESHOLD_ENABLED] ベクトル類似度が閾値未満のチャンクを除外
   ↓ [HYBRID_ENABLED]  pg_bigm キーワード検索 → RRF 融合
   ↓ [RERANK_ENABLED]  bge-reranker-v2-m3 → 上位 top_k 件
+  ↓ [ADJACENT_CHUNK_ENABLED]  前後（chunk_index ±window）を追加取得
   → list[dict]
 ```
 
@@ -57,6 +61,21 @@ query
 
 **Citation**: システムプロンプトのみ変更。context を `[1] ... \n[2] ...` 形式で番号付きにし
 「引用番号を使って回答せよ」と指示する。フロントエンドの変更は不要。
+
+**Score Threshold**: pgvector ベクトル検索の直後、`HYBRID_ENABLED`/`RERANK_ENABLED` を
+適用する**前**にチャンクの `score`（コサイン類似度）が `SCORE_THRESHOLD` 未満のものを除外する。
+この位置に置く理由: HYBRID の RRF 融合はキーワードのみでヒットしたチャンクに
+`bigm_similarity`（コサイン類似度とスケールが異なる）を `score` として持たせるため、
+融合後に閾値判定すると尺度の異なる値を比較することになり、有効なキーワードヒットを
+誤って除外してしまう。同様に RERANK は `score` を書き換えないため、Rerank 後に判定すると
+古いベクトルスコアで CrossEncoder の再評価を握りつぶしてしまう。ベクトル検索直後に
+適用することでどちらの問題も避けられる。除外の結果チャンクが 0 件になった場合、
+`chat()` は Ollama を呼ばずに「該当する情報が見つかりませんでした」を即座に返す
+（無関係な文脈から LLM が答えを捏造する幻覚を防ぐ）。
+
+**Adjacent Chunk Expansion**: ヒットしたチャンクの `chunk_index` の前後 ±`ADJACENT_CHUNK_WINDOW`
+を `PgVectorStore.get_by_indices` で追加取得し、`book_id, chunk_index` 順にマージする。
+既にヒット済みの chunk_index は再取得しない。回答の根拠となる文脈の連続性を補う狙い。
 
 ---
 

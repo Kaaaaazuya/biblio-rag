@@ -126,6 +126,8 @@ class VectorStore(ABC):
 | `HYBRID_ENABLED` | pg_bigm + RRF 融合 | 固有名詞・技術用語の取りこぼし補完 |
 | `RERANK_ENABLED` | クロスエンコーダ再スコアリング | 「意味は近いが答えでない」チャンクを後退させる |
 | `CITATION_ENABLED` | 回答内引用番号付与 | 根拠チャンクと回答文の対応を明示 |
+| `SCORE_THRESHOLD_ENABLED` | スコア閾値判定 | 閾値未満のみの場合は LLM を呼ばず「該当情報なし」を返し幻覚を防ぐ |
+| `ADJACENT_CHUNK_ENABLED` | 隣接チャンク展開 | ヒットチャンクの前後（chunk_index ±window）を追加取得し文脈を補う |
 
 ### 既知の限界（MVP）
 
