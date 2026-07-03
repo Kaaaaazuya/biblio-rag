@@ -155,6 +155,18 @@ def test_chat_rejects_non_string_book_id():
     assert "book_id" in res.json()["detail"]
 
 
+def test_chat_rejects_malformed_json_body():
+    """JSON として解釈できないリクエストボディを受けたとき 500 ではなく 400 を返す（Issue #37）。"""
+    client = TestClient(server.app, raise_server_exceptions=False)
+    res = client.post(
+        "/api/chat",
+        content=b"not valid json{{{",
+        headers={"Content-Type": "application/json"},
+    )
+    assert res.status_code == 400
+    assert "detail" in res.json()
+
+
 def test_chat_sse_sources_event(monkeypatch):
     monkeypatch.setattr(server, "_retrieve", _fake_retrieve)
     monkeypatch.setattr(
@@ -349,6 +361,31 @@ def test_chat_accepts_valid_history_roles(monkeypatch):
         },
     )
     assert res.status_code == 200
+
+
+def test_chat_rejects_history_exceeding_message_count(monkeypatch):
+    """history のメッセージ件数が上限（config.MAX_HISTORY_MESSAGES）を超える場合は 422 を返す。"""
+    history = [
+        {"role": "user" if i % 2 == 0 else "assistant", "content": "x"}
+        for i in range(server.config.MAX_HISTORY_MESSAGES + 1)
+    ]
+    res = _client.post("/api/chat", json={"query": "test", "history": history})
+    assert res.status_code == 422
+    assert "history" in res.json()["detail"]
+
+
+def test_chat_rejects_history_exceeding_total_chars(monkeypatch):
+    """history の合計文字数が上限（config.MAX_HISTORY_TOTAL_CHARS）を超える場合は 422 を返す。"""
+    long_content = "あ" * (server.config.MAX_HISTORY_TOTAL_CHARS + 1)
+    res = _client.post(
+        "/api/chat",
+        json={
+            "query": "test",
+            "history": [{"role": "user", "content": long_content}],
+        },
+    )
+    assert res.status_code == 422
+    assert "history" in res.json()["detail"]
 
 
 def test_chat_rejects_empty_history_message(monkeypatch):

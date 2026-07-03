@@ -27,6 +27,10 @@ CITATION_ENABLED = os.getenv("CITATION_ENABLED", "false").lower() == "true"
 RERANK_CANDIDATE_K = int(os.getenv("RERANK_CANDIDATE_K", "20"))
 RERANK_MODEL = os.getenv("RERANK_MODEL", "BAAI/bge-reranker-v2-m3")
 
+# チャット履歴（/api/chat の history）の上限。過大なコンテキストが LLM に渡るのを防ぐ。
+MAX_HISTORY_MESSAGES = int(os.getenv("MAX_HISTORY_MESSAGES", "40"))
+MAX_HISTORY_TOTAL_CHARS = int(os.getenv("MAX_HISTORY_TOTAL_CHARS", "20000"))
+
 # スコア閾値未満のチャンクを除外し、「該当情報なし」を明示する（幻覚対策）
 SCORE_THRESHOLD_ENABLED = os.getenv("SCORE_THRESHOLD_ENABLED", "false").lower() == "true"
 SCORE_THRESHOLD = float(os.getenv("SCORE_THRESHOLD", "0.5"))
