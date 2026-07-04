@@ -30,6 +30,7 @@ from starlette.responses import JSONResponse, StreamingResponse
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
+from webui.auth import AuthMiddleware
 from webui.logging_config import configure_logging
 from workers import config
 from workers.storage import RAW_PREFIX, StatusStore
@@ -874,3 +875,6 @@ app = Starlette(
         Mount("/", app=StaticFiles(directory=STATIC_DIR, html=True), name="static"),
     ]
 )
+
+# 認証ミドルウェアをマウント
+app.add_middleware(AuthMiddleware)

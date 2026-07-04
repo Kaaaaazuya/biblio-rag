@@ -49,6 +49,14 @@ S3_ENDPOINT_URL = os.getenv("S3_ENDPOINT_URL") or None
 S3_BUCKET = os.getenv("S3_BUCKET", "biblio")
 AWS_REGION = os.getenv("AWS_REGION", "ap-northeast-1")
 
+# WebUI 認証（公開前提での保護）
+# WEBUI_AUTH_ENABLED=false（デフォルト）時はローカル開発で認証なし
+WEBUI_AUTH_ENABLED = os.getenv("WEBUI_AUTH_ENABLED", "false").lower() == "true"
+WEBUI_AUTH_METHOD = os.getenv("WEBUI_AUTH_METHOD", "token")  # token または basic
+WEBUI_AUTH_TOKEN = os.getenv("WEBUI_AUTH_TOKEN", "")
+WEBUI_AUTH_USERNAME = os.getenv("WEBUI_AUTH_USERNAME", "")
+WEBUI_AUTH_PASSWORD = os.getenv("WEBUI_AUTH_PASSWORD", "")
+
 
 def s3_client():
     """boto3 S3 クライアント。資格情報は環境変数（.env）から自動解決。"""
