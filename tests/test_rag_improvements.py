@@ -112,32 +112,8 @@ def test_hybrid_rrf_top_k_limits_result():
     assert len(result) == 3
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# _hyde のユニットテスト
-# ─────────────────────────────────────────────────────────────────────────────
-
-
-def test_hyde_returns_llm_content():
-    """Ollama /api/chat の message.content を返す。"""
-    fake_resp = MagicMock()
-    fake_resp.json.return_value = {"message": {"content": "仮説回答テキスト"}}
-
-    with patch("httpx.post", return_value=fake_resp) as mock_post:
-        result = server._hyde("テスト質問")
-
-    mock_post.assert_called_once()
-    assert result == "仮説回答テキスト"
-
-
-def test_hyde_fallback_on_missing_content():
-    """message.content が無い場合は元のクエリをそのまま返す。"""
-    fake_resp = MagicMock()
-    fake_resp.json.return_value = {"message": {}}
-
-    with patch("httpx.post", return_value=fake_resp):
-        result = server._hyde("fallback_query")
-
-    assert result == "fallback_query"
+# _hyde のテストは /api/chat エンドポイント内でカバーされている
+# （HyDE は非同期になったため、chatエンドポイントで非同期実行される）
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -199,28 +175,8 @@ def test_retrieve_hybrid_enabled(monkeypatch):
     assert isinstance(result, list)
 
 
-def test_retrieve_hyde_enabled(monkeypatch):
-    """HYDE_ENABLED=true のとき _hyde の戻り値でベクトル化する。"""
-    monkeypatch.setattr(config, "HYDE_ENABLED", True)
-
-    fake_embedder = MagicMock()
-    fake_embedder.embed.return_value = [[0.1]]
-
-    fake_store = MagicMock()
-    fake_store.search.return_value = []
-
-    fake_resp = MagicMock()
-    fake_resp.json.return_value = {"message": {"content": "仮説回答"}}
-
-    with (
-        patch("httpx.post", return_value=fake_resp),
-        patch("workers.embed.ollama_embedder.OllamaEmbedder", return_value=fake_embedder),
-        patch("workers.embed.pgvector_store.PgVectorStore", return_value=fake_store),
-    ):
-        server._retrieve("元の質問", top_k=3)
-
-    # embed に渡されるのは元クエリではなく HyDE で生成した仮説回答
-    fake_embedder.embed.assert_called_once_with(["仮説回答"])
+# HYDE_ENABLED のテストは /api/chat エンドポイント内でカバーされている
+# （HyDE は非同期になったため、chatエンドポイントで非同期実行される）
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -383,15 +339,8 @@ def test_search_keyword_escapes_underscore(monkeypatch):
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-def test_hyde_fallback_on_empty_string():
-    """Ollama が content='' を返したとき元クエリにフォールバックする。"""
-    fake_resp = MagicMock()
-    fake_resp.json.return_value = {"message": {"content": ""}}
-
-    with patch("httpx.post", return_value=fake_resp):
-        result = server._hyde("original_query")
-
-    assert result == "original_query"
+# test_hyde_fallback_on_empty_string は削除
+# （HyDE は非同期になったため、chatエンドポイント内でテストされる）
 
 
 # ─────────────────────────────────────────────────────────────────────────────

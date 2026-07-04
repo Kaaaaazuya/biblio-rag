@@ -19,6 +19,10 @@ CHAT_MODEL = os.getenv("CHAT_MODEL", "qwen2.5:7b")
 EMBED_BACKEND = os.getenv("EMBED_BACKEND", "ollama")
 BEDROCK_EMBED_MODEL = os.getenv("BEDROCK_EMBED_MODEL", "amazon.titan-embed-text-v2:0")
 
+# CHAT_BACKEND=bedrock のとき BedrockChatClient を使う（デフォルトは ollama）
+CHAT_BACKEND = os.getenv("CHAT_BACKEND", "ollama").strip().lower()
+BEDROCK_CHAT_MODEL = os.getenv("BEDROCK_CHAT_MODEL", "anthropic.claude-opus-4-1-20250805")
+
 # RAG 改善フラグ（デフォルトはすべて無効）
 RERANK_ENABLED = os.getenv("RERANK_ENABLED", "false").lower() == "true"
 HYBRID_ENABLED = os.getenv("HYBRID_ENABLED", "false").lower() == "true"

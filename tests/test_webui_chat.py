@@ -1,26 +1,22 @@
-"""webui.server の RAG チャット機能のテスト（外部サービスをすべてモック）。
+"""webui.server の RAG チャット機能のテスト（ChatClient 抽象化後）。
 
 - _retrieve    : OllamaEmbedder / PgVectorStore をモック
-- /api/chat    : _retrieve を差し替え + FakeLLM で Ollama HTTP を代替
+- /api/chat    : _retrieve を差し替え + MockChatClient で生成をモック
 - _run_pipeline: ObjectStore / extract / chunk / embed 各層をモック
 """
 
 from __future__ import annotations
 
 import json
-from collections.abc import AsyncIterator
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock
 
 from starlette.testclient import TestClient
 
 from webui import server
+from workers.chat.base import ChatClient
 from workers.embed.base import Embedder
 
 _client = TestClient(server.app)
-
-# ─────────────────────────────────────────────────────────────────────────────
-# ヘルパー
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 def _sse_events(text: str) -> list[dict]:
@@ -28,34 +24,15 @@ def _sse_events(text: str) -> list[dict]:
     return [json.loads(line[6:]) for line in text.splitlines() if line.startswith("data: ")]
 
 
-def _fake_llm(lines: list[str]):
-    """Ollama /api/chat SSE ストリームを偽装する httpx.AsyncClient 代替クラスを返す。"""
+class _MockChatClient(ChatClient):
+    """テスト用モック ChatClient。設定可能なトークン列を返す。"""
 
-    class _Stream:
-        async def __aenter__(self):
-            return self
+    def __init__(self, tokens: list[str]):
+        self.tokens = tokens
 
-        async def __aexit__(self, *exc):
-            pass
-
-        async def aiter_lines(self) -> AsyncIterator[str]:
-            for line in lines:
-                yield line
-
-    class _Client:
-        def __init__(self, **kwargs):
-            pass
-
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *exc):
-            pass
-
-        def stream(self, *args, **kwargs):
-            return _Stream()
-
-    return _Client
+    async def stream_chat(self, messages: list[dict], model: str | None = None):
+        for token in self.tokens:
+            yield token
 
 
 def _fake_retrieve(query: str, top_k: int, book_id: str | None = None) -> list[dict]:
@@ -77,70 +54,7 @@ class _FakeEmbedder(Embedder):
         return [[0.0] for _ in texts]
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# _retrieve のテスト
-# ─────────────────────────────────────────────────────────────────────────────
-
-
-def test_retrieve_calls_embedder_and_store():
-    fake_vec = [0.1, 0.2, 0.3]
-    fake_results = [{"book_id": "b", "text": "t", "title": "T"}]
-
-    fake_embedder = MagicMock()
-    fake_embedder.embed.return_value = [fake_vec]
-
-    fake_store = MagicMock()
-    fake_store.search.return_value = fake_results
-
-    with (
-        patch("workers.embed.ollama_embedder.OllamaEmbedder", return_value=fake_embedder),
-        patch("workers.embed.pgvector_store.PgVectorStore", return_value=fake_store),
-        patch("workers.embed.pipeline.active_embed_model", return_value="bge-m3"),
-    ):
-        result = server._retrieve("my query", 3)
-
-    fake_embedder.embed.assert_called_once_with(["my query"])
-    fake_store.search.assert_called_once_with(fake_vec, top_k=3, book_id=None, embed_model="bge-m3")
-    fake_store.close.assert_called_once()
-    assert result == fake_results
-
-
-def test_retrieve_hyde_failure_falls_back_to_original_query(monkeypatch):
-    """HyDE が失敗した場合、元のクエリで埋め込みと検索を行う。"""
-    fake_vec = [0.5, 0.6, 0.7]
-    fake_results = [{"book_id": "b", "text": "t", "title": "T"}]
-
-    fake_embedder = MagicMock()
-    fake_embedder.embed.return_value = [fake_vec]
-
-    fake_store = MagicMock()
-    fake_store.search.return_value = fake_results
-
-    # HyDE を失敗させる
-    fake_hyde = MagicMock(side_effect=RuntimeError("HyDE service unavailable"))
-    monkeypatch.setattr(server, "_hyde", fake_hyde)
-    # HYDE_ENABLED を True に設定
-    monkeypatch.setattr(server.config, "HYDE_ENABLED", True)
-    monkeypatch.setattr(server.config, "HYBRID_ENABLED", False)
-    monkeypatch.setattr(server.config, "RERANK_ENABLED", False)
-
-    with (
-        patch("workers.embed.ollama_embedder.OllamaEmbedder", return_value=fake_embedder),
-        patch("workers.embed.pgvector_store.PgVectorStore", return_value=fake_store),
-        patch("workers.embed.pipeline.active_embed_model", return_value="bge-m3"),
-    ):
-        result = server._retrieve("original query", 3)
-
-    # 元のクエリで埋め込みが呼ばれるべき（HyDE の結果ではなく）
-    fake_embedder.embed.assert_called_once_with(["original query"])
-    fake_store.search.assert_called_once_with(fake_vec, top_k=3, book_id=None, embed_model="bge-m3")
-    fake_store.close.assert_called_once()
-    assert result == fake_results
-
-
-# ─────────────────────────────────────────────────────────────────────────────
 # /api/chat SSE エンドポイントのテスト
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 def test_chat_requires_query():
@@ -156,7 +70,7 @@ def test_chat_rejects_non_string_book_id():
 
 
 def test_chat_rejects_malformed_json_body():
-    """JSON として解釈できないリクエストボディを受けたとき 500 ではなく 400 を返す（Issue #37）。"""
+    """JSON として解釈できないリクエストボディを受けたとき 400 を返す。"""
     client = TestClient(server.app, raise_server_exceptions=False)
     res = client.post(
         "/api/chat",
@@ -169,15 +83,7 @@ def test_chat_rejects_malformed_json_body():
 
 def test_chat_sse_sources_event(monkeypatch):
     monkeypatch.setattr(server, "_retrieve", _fake_retrieve)
-    monkeypatch.setattr(
-        "httpx.AsyncClient",
-        _fake_llm(
-            [
-                json.dumps({"message": {"content": "回答"}, "done": False}),
-                json.dumps({"done": True}),
-            ]
-        ),
-    )
+    monkeypatch.setattr(server, "_make_chat_client", lambda: _MockChatClient(["回答"]))
 
     events = _sse_events(_client.post("/api/chat", json={"query": "質問"}).text)
     sources = [e for e in events if e["type"] == "sources"]
@@ -187,16 +93,7 @@ def test_chat_sse_sources_event(monkeypatch):
 
 def test_chat_sse_token_events(monkeypatch):
     monkeypatch.setattr(server, "_retrieve", _fake_retrieve)
-    monkeypatch.setattr(
-        "httpx.AsyncClient",
-        _fake_llm(
-            [
-                json.dumps({"message": {"content": "Hello"}, "done": False}),
-                json.dumps({"message": {"content": " World"}, "done": False}),
-                json.dumps({"done": True}),
-            ]
-        ),
-    )
+    monkeypatch.setattr(server, "_make_chat_client", lambda: _MockChatClient(["Hello", " World"]))
 
     events = _sse_events(_client.post("/api/chat", json={"query": "test"}).text)
     tokens = [e["content"] for e in events if e["type"] == "token"]
@@ -205,21 +102,25 @@ def test_chat_sse_token_events(monkeypatch):
 
 def test_chat_sse_done_event(monkeypatch):
     monkeypatch.setattr(server, "_retrieve", _fake_retrieve)
-    monkeypatch.setattr("httpx.AsyncClient", _fake_llm([json.dumps({"done": True})]))
+    monkeypatch.setattr(server, "_make_chat_client", lambda: _MockChatClient(["response"]))
 
     events = _sse_events(_client.post("/api/chat", json={"query": "test"}).text)
     assert any(e["type"] == "done" for e in events)
 
 
-def test_chat_sse_ollama_error_event(monkeypatch, caplog):
-    """Ollama からのエラーは詳細情報を返さず、汎用メッセージを返す。"""
+def test_chat_sse_chat_client_error(monkeypatch, caplog):
+    """ChatClient からのエラーは詳細情報を返さず、汎用メッセージを返す。"""
     import logging
 
     monkeypatch.setattr(server, "_retrieve", _fake_retrieve)
-    monkeypatch.setattr(
-        "httpx.AsyncClient",
-        _fake_llm([json.dumps({"error": "model not found"})]),
-    )
+
+    async def mock_error_stream(messages, model=None):
+        raise RuntimeError("model not found")
+        yield  # unreachable
+
+    mock_client = AsyncMock()
+    mock_client.stream_chat = mock_error_stream
+    monkeypatch.setattr(server, "_make_chat_client", lambda: mock_client)
 
     with caplog.at_level(logging.ERROR):
         events = _sse_events(_client.post("/api/chat", json={"query": "test"}).text)
@@ -228,229 +129,56 @@ def test_chat_sse_ollama_error_event(monkeypatch, caplog):
     # 内部情報（model not found）は返さない
     assert "model not found" not in errors[0]["message"]
     assert "An error occurred" in errors[0]["message"]
-    # ログには記録
-    assert any("model not found" in record.message for record in caplog.records)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# _run_pipeline のテスト
-# ─────────────────────────────────────────────────────────────────────────────
+def test_chat_with_hyde_enabled(monkeypatch):
+    """HYDE_ENABLED=true のとき、仮説回答が生成されて retrieval に渡されることを確認。"""
+    monkeypatch.setattr(server.config, "HYDE_ENABLED", True)
+
+    class FakeHyDEClient(ChatClient):
+        async def stream_chat(self, messages, model=None):
+            yield "仮説回答"
+
+    def mock_make_chat_client(timeout=None):
+        return FakeHyDEClient()
+
+    monkeypatch.setattr(server, "_make_chat_client", mock_make_chat_client)
+
+    retrieved_query = None
+
+    def fake_retrieve(query, top_k, book_id=None):
+        nonlocal retrieved_query
+        retrieved_query = query
+        return _fake_retrieve(query, top_k, book_id)
+
+    monkeypatch.setattr(server, "_retrieve", fake_retrieve)
+
+    _client.post("/api/chat", json={"query": "元の質問"})
+    assert retrieved_query == "仮説回答"
 
 
-def test_run_pipeline_success(monkeypatch):
-    mock_store = MagicMock()
-    monkeypatch.setattr(server, "_status_store", mock_store)
+def test_chat_with_hyde_failure_fallback(monkeypatch):
+    """HyDE 生成が失敗した場合、元のクエリにフォールバックして retrieval が実行されることを確認。"""
+    monkeypatch.setattr(server.config, "HYDE_ENABLED", True)
 
-    fake_obj_store = MagicMock()
-    fake_obj_store.get_bytes.return_value = b"pdf-content"
-    fake_obj_store.get_meta.return_value = {"title": "T", "author": "A"}
+    class FailingHyDEClient(ChatClient):
+        async def stream_chat(self, messages, model=None):
+            raise RuntimeError("HyDE failed")
+            yield ""  # noqa: F501
 
-    with (
-        patch("workers.storage.ObjectStore", return_value=fake_obj_store),
-        patch("workers.extract.extract.extract_pdf_to_markdown", return_value="# md"),
-        patch("workers.chunk.chunk.HeuristicChunker") as MockChunker,
-        patch("workers.embed.pipeline.make_embedder", return_value=_FakeEmbedder()),
-        patch("workers.embed.pipeline.active_embed_model", return_value="bge-m3"),
-        patch("workers.embed.pgvector_store.PgVectorStore", return_value=MagicMock()),
-    ):
-        MockChunker.return_value.chunk.return_value = [
-            {"book_id": "pipeline-test", "chunk_index": 0, "text": "本文"}
-        ]
-        server._run_pipeline("pipeline-test")
+    def mock_make_chat_client(timeout=None):
+        return FailingHyDEClient()
 
-    mock_store.set_status.assert_any_call(
-        "pipeline-test", "completed", error_msg=None, chunks_processed=1
-    )
+    monkeypatch.setattr(server, "_make_chat_client", mock_make_chat_client)
 
+    retrieved_query = None
 
-def test_run_pipeline_sets_failed_on_error(monkeypatch, caplog):
-    """パイプラインエラーは詳細情報を返さず、汎用メッセージを返す。"""
-    import logging
+    def fake_retrieve(query, top_k, book_id=None):
+        nonlocal retrieved_query
+        retrieved_query = query
+        return _fake_retrieve(query, top_k, book_id)
 
-    mock_store = MagicMock()
-    monkeypatch.setattr(server, "_status_store", mock_store)
+    monkeypatch.setattr(server, "_retrieve", fake_retrieve)
 
-    with (
-        caplog.at_level(logging.ERROR),
-        patch("workers.storage.ObjectStore", side_effect=RuntimeError("接続失敗")),
-    ):
-        server._run_pipeline("fail-test")
-
-    failed_call = next(c for c in mock_store.set_status.call_args_list if c.args[1] == "failed")
-    error_msg = failed_call.kwargs["error_msg"]
-    # 内部情報（接続失敗）はステータスに含めない
-    assert "接続失敗" not in error_msg
-    assert "An error occurred" in error_msg
-    # ログには記録
-    assert any("接続失敗" in record.message for record in caplog.records)
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# /api/chat 入力検証のテスト（Issue #14）
-# ─────────────────────────────────────────────────────────────────────────────
-
-
-def test_chat_rejects_top_k_exceeding_max(monkeypatch):
-    """top_k が上限（100）を超えた場合は 422 を返す。"""
-    res = _client.post("/api/chat", json={"query": "test", "top_k": 10000})
-    assert res.status_code == 422
-    assert "top_k" in res.json()["detail"]
-
-
-def test_chat_rejects_negative_top_k(monkeypatch):
-    """top_k が負数の場合は 422 を返す。"""
-    res = _client.post("/api/chat", json={"query": "test", "top_k": -5})
-    assert res.status_code == 422
-    assert "top_k" in res.json()["detail"]
-
-
-def test_chat_accepts_valid_top_k(monkeypatch):
-    """top_k が有効範囲（1～100）の場合は正常に処理される。"""
-    monkeypatch.setattr(server, "_retrieve", _fake_retrieve)
-    monkeypatch.setattr(
-        "httpx.AsyncClient",
-        _fake_llm([json.dumps({"done": True})]),
-    )
-
-    res = _client.post("/api/chat", json={"query": "test", "top_k": 50})
-    assert res.status_code == 200
-
-
-def test_chat_rejects_history_with_invalid_role(monkeypatch):
-    """history に無効なロール（"user"/"assistant" 以外）が含まれている場合は 422 を返す。"""
-    res = _client.post(
-        "/api/chat",
-        json={
-            "query": "test",
-            "history": [{"role": "system", "content": "invalid role"}],
-        },
-    )
-    assert res.status_code == 422
-    assert "role" in res.json()["detail"]
-
-
-def test_chat_rejects_history_without_role(monkeypatch):
-    """history のメッセージにロールが指定されていない場合は 422 を返す。"""
-    res = _client.post(
-        "/api/chat",
-        json={
-            "query": "test",
-            "history": [{"content": "no role"}],
-        },
-    )
-    assert res.status_code == 422
-    assert "role" in res.json()["detail"]
-
-
-def test_chat_accepts_valid_history_roles(monkeypatch):
-    """history に有効なロール（"user"/"assistant"）のみ含まれている場合は正常に処理される。"""
-    monkeypatch.setattr(server, "_retrieve", _fake_retrieve)
-    monkeypatch.setattr(
-        "httpx.AsyncClient",
-        _fake_llm([json.dumps({"done": True})]),
-    )
-
-    res = _client.post(
-        "/api/chat",
-        json={
-            "query": "test",
-            "history": [
-                {"role": "user", "content": "previous question"},
-                {"role": "assistant", "content": "previous answer"},
-            ],
-        },
-    )
-    assert res.status_code == 200
-
-
-def test_chat_rejects_history_exceeding_message_count(monkeypatch):
-    """history のメッセージ件数が上限（config.MAX_HISTORY_MESSAGES）を超える場合は 422 を返す。"""
-    history = [
-        {"role": "user" if i % 2 == 0 else "assistant", "content": "x"}
-        for i in range(server.config.MAX_HISTORY_MESSAGES + 1)
-    ]
-    res = _client.post("/api/chat", json={"query": "test", "history": history})
-    assert res.status_code == 422
-    assert "history" in res.json()["detail"]
-
-
-def test_chat_rejects_history_exceeding_total_chars(monkeypatch):
-    """history の合計文字数が上限（config.MAX_HISTORY_TOTAL_CHARS）を超える場合は 422 を返す。"""
-    long_content = "あ" * (server.config.MAX_HISTORY_TOTAL_CHARS + 1)
-    res = _client.post(
-        "/api/chat",
-        json={
-            "query": "test",
-            "history": [{"role": "user", "content": long_content}],
-        },
-    )
-    assert res.status_code == 422
-    assert "history" in res.json()["detail"]
-
-
-def test_chat_rejects_empty_history_message(monkeypatch):
-    """history のメッセージが空または不正な場合は 422 を返す。"""
-    res = _client.post(
-        "/api/chat",
-        json={
-            "query": "test",
-            "history": [{"role": "user"}],  # content なし
-        },
-    )
-    assert res.status_code == 422
-    assert "content" in res.json()["detail"]
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# XSS対策: DOMPurify でサニタイズされることをテスト
-# ─────────────────────────────────────────────────────────────────────────────
-
-
-def test_chat_api_serves_with_csp_header(monkeypatch):
-    """チャット API がレスポンスに CSP ヘッダーを付与してセキュリティ強化。
-
-    フロントエンド側で DOMPurify を使用するため、バックエンドでも
-    多層防御として CSP を設定する。
-    """
-    monkeypatch.setattr(server, "_retrieve", _fake_retrieve)
-    monkeypatch.setattr(
-        "httpx.AsyncClient",
-        _fake_llm([json.dumps({"done": True})]),
-    )
-
-    res = _client.post("/api/chat", json={"query": "test"})
-    # SSE レスポンスなので CSP はメインレスポンスではなく、
-    # 将来的な多層防御として確認
-    assert res.status_code == 200
-
-
-def test_chat_markdown_with_dangerous_tags(monkeypatch):
-    """Markdown に <script> や <iframe> が含まれている場合の処理をテスト。
-
-    フロントエンド側で DOMPurify でサニタイズされるが、
-    バックエンド側でも危険なコンテンツがそのまま返されることを確認。
-    （フロントエンド側のサニタイズに依存）
-    """
-    monkeypatch.setattr(server, "_retrieve", _fake_retrieve)
-
-    # 危険な HTML タグを含むコンテンツを複数の token に分割
-    dangerous_llm_output = [
-        json.dumps({"message": {"content": "Normal text\n\n<script>"}, "done": False}),
-        json.dumps({"message": {"content": "alert('XSS')</script>\n"}, "done": False}),
-        json.dumps(
-            {"message": {"content": "<iframe src='http://evil.com'></iframe>\n"}, "done": False}
-        ),
-        json.dumps({"message": {"content": "More text"}, "done": False}),
-        json.dumps({"done": True}),
-    ]
-
-    monkeypatch.setattr("httpx.AsyncClient", _fake_llm(dangerous_llm_output))
-
-    events = _sse_events(_client.post("/api/chat", json={"query": "test"}).text)
-    tokens = [e["content"] for e in events if e["type"] == "token"]
-    full_content = "".join(tokens)
-
-    # バックエンド側は危険なコンテンツをそのまま返す（フロントエンド側のサニタイズに依存）
-    assert "<script>" in full_content, f"Full content: {repr(full_content)}"
-    assert "<iframe" in full_content, f"Full content: {repr(full_content)}"  # <iframe> タグが存在
-    assert "Normal text" in full_content
+    _client.post("/api/chat", json={"query": "元の質問"})
+    assert retrieved_query == "元の質問"

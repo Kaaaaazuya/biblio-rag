@@ -134,7 +134,6 @@ def _object_exists(bucket: str, key: str) -> bool:
 def _retrieve(query: str, top_k: int, book_id: str | None = None) -> list[dict]:
     """クエリを埋め込み、pgvector から類似チャンクを取得する（同期・スレッドで実行）。
 
-    HYDE_ENABLED           : 仮説回答を生成してからベクトル化する
     HYBRID_ENABLED         : pg_bigm キーワード検索と RRF 融合する
     RERANK_ENABLED         : CrossEncoder で再スコアリングして top_k に絞る
     SCORE_THRESHOLD_ENABLED: ベクトル検索直後にスコア閾値未満の候補を除外する
@@ -147,14 +146,8 @@ def _retrieve(query: str, top_k: int, book_id: str | None = None) -> list[dict]:
     from workers.embed.pgvector_store import PgVectorStore
     from workers.embed.pipeline import active_embed_model
 
-    search_query = query
-    if config.HYDE_ENABLED:
-        with contextlib.suppress(Exception):
-            # HyDE 失敗時は元のクエリにフォールバック
-            search_query = _hyde(query)
-
     embedder = OllamaEmbedder(config.OLLAMA_HOST, config.EMBED_MODEL, config.EMBED_DIM)
-    vec = embedder.embed([search_query])[0]
+    vec = embedder.embed([query])[0]
 
     candidate_k = max(config.RERANK_CANDIDATE_K, top_k) if config.RERANK_ENABLED else top_k
     store = PgVectorStore(config.database_url())
@@ -220,21 +213,18 @@ def _expand_adjacent_chunks(chunks: list[dict], store, window: int) -> list[dict
     return merged
 
 
-def _hyde(query: str) -> str:
-    """クエリへの仮説回答を CHAT_MODEL で生成して返す（HyDE）。"""
-    resp = httpx.post(
-        f"{config.OLLAMA_HOST}/api/chat",
-        json={
-            "model": config.CHAT_MODEL,
-            "messages": [
-                {"role": "user", "content": f"次の質問に対して簡潔に答えてください: {query}"}
-            ],
-            "stream": False,
-        },
-        timeout=30.0,
-    )
-    resp.raise_for_status()
-    content = resp.json().get("message", {}).get("content") or ""
+async def _hyde(query: str) -> str:
+    """クエリへの仮説回答を ChatClient で生成して返す（HyDE）。"""
+    content = ""
+    try:
+        client = _make_chat_client(timeout=30.0)
+        async for token in client.stream_chat(
+            [{"role": "user", "content": f"次の質問に対して簡潔に答えてください: {query}"}]
+        ):
+            content += token
+    except Exception as e:  # noqa: BLE001
+        logger.warning(f"HyDE 生成失敗: {e}, クエリにフォールバック")
+        return query
     return content if content else query
 
 
@@ -285,6 +275,20 @@ _LANG_INSTRUCTIONS: dict[str, str] = {
     "ja": "回答は必ず日本語で行ってください。",
     "en": "You must respond in English.",
 }
+
+
+def _make_chat_client(timeout: float | None = None):
+    """設定に基づいてChatClientを作成する。"""
+    from workers.chat.ollama_chat import OllamaChatClient
+
+    if config.CHAT_BACKEND == "ollama":
+        kwargs: dict[str, float] = {}
+        if timeout is not None:
+            kwargs["timeout"] = timeout
+        return OllamaChatClient(config.OLLAMA_HOST, config.CHAT_MODEL, **kwargs)
+    # 将来: bedrock 実装を追加
+    raise ValueError(f"Unknown CHAT_BACKEND: {config.CHAT_BACKEND}")
+
 
 _SYSTEM_PROMPT = """\
 {persona}Answer questions based on the provided reference text.
@@ -390,9 +394,16 @@ async def chat(request: Request) -> StreamingResponse | JSONResponse:
         return JSONResponse({"detail": "book_id は文字列である必要があります"}, status_code=400)
     book_id: str | None = book_id_raw or None
 
+    # HyDE: クエリから仮説回答を生成（非同期）
+    search_query = query
+    if config.HYDE_ENABLED:
+        search_query = await _hyde(query)
+
+    # 検索実行（同期・スレッド）
     loop = asyncio.get_running_loop()
     try:
-        chunks = await loop.run_in_executor(None, _retrieve, query, top_k, book_id)
+        # _retrieve の署名は (query, top_k, book_id) を使用
+        chunks = await loop.run_in_executor(None, _retrieve, search_query, top_k, book_id)
     except Exception as e:  # noqa: BLE001
         logger.error(f"Retrieval error: {e}", exc_info=True)
         return JSONResponse(
@@ -439,41 +450,19 @@ async def chat(request: Request) -> StreamingResponse | JSONResponse:
         src_msg = json.dumps({"type": "sources", "sources": sources}, ensure_ascii=False)
         yield f"data: {src_msg}\n\n"
         try:
-            async with (
-                httpx.AsyncClient(timeout=120.0) as client,
-                client.stream(
-                    "POST",
-                    f"{config.OLLAMA_HOST}/api/chat",
-                    json={"model": config.CHAT_MODEL, "messages": messages, "stream": True},
-                ) as resp,
-            ):
-                async for line in resp.aiter_lines():
-                    if not line:
-                        continue
-                    try:
-                        data = json.loads(line)
-                    except json.JSONDecodeError:
-                        continue
-                    if err := data.get("error"):
-                        logger.error(f"Ollama error: {err}")
-                        error_msg = (
-                            "An error occurred while generating a response. Please try again."
-                        )
-                        msg = json.dumps(
-                            {
-                                "type": "error",
-                                "message": error_msg,
-                            },
-                            ensure_ascii=False,
-                        )
-                        yield f"data: {msg}\n\n"
-                        return
-                    if content := data.get("message", {}).get("content", ""):
-                        msg = json.dumps({"type": "token", "content": content}, ensure_ascii=False)
-                        yield f"data: {msg}\n\n"
-                    if data.get("done"):
-                        yield f"data: {json.dumps({'type': 'done'})}\n\n"
-                        return
+            client = _make_chat_client()
+            async for token in client.stream_chat(messages):
+                msg = json.dumps({"type": "token", "content": token}, ensure_ascii=False)
+                yield f"data: {msg}\n\n"
+            yield f"data: {json.dumps({'type': 'done'})}\n\n"
+        except RuntimeError as e:
+            logger.error(f"Chat generation error: {e}", exc_info=True)
+            error_msg = "An error occurred while generating a response. Please try again."
+            msg = json.dumps(
+                {"type": "error", "message": error_msg},
+                ensure_ascii=False,
+            )
+            yield f"data: {msg}\n\n"
         except Exception as e:  # noqa: BLE001
             logger.error(f"Chat error: {e}", exc_info=True)
             msg = json.dumps(
