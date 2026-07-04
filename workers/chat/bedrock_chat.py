@@ -18,6 +18,7 @@ import asyncio
 from collections.abc import AsyncIterator
 
 import boto3
+from botocore.config import Config
 
 from .base import ChatClient
 
@@ -35,8 +36,14 @@ def _to_converse_format(messages: list[dict]) -> tuple[list[dict], list[dict]]:
 
 
 class BedrockChatClient(ChatClient):
-    def __init__(self, model_id: str, region: str = "ap-northeast-1"):
-        self._client = boto3.client("bedrock-runtime", region_name=region)
+    def __init__(
+        self,
+        model_id: str,
+        region: str = "ap-northeast-1",
+        timeout: float | None = None,
+    ):
+        client_config = Config(read_timeout=timeout) if timeout is not None else None
+        self._client = boto3.client("bedrock-runtime", region_name=region, config=client_config)
         self.model_id = model_id
 
     async def stream_chat(
@@ -51,19 +58,28 @@ class BedrockChatClient(ChatClient):
         loop = asyncio.get_running_loop()
         queue: asyncio.Queue = asyncio.Queue()
         sentinel = object()
+        cancelled = False
+        stream = None
 
         def _run() -> None:
+            nonlocal stream
             try:
                 kwargs: dict = {"modelId": use_model, "messages": converse_messages}
                 if system:
                     kwargs["system"] = system
                 resp = self._client.converse_stream(**kwargs)
-                for event in resp["stream"]:
+                stream = resp["stream"]
+                if cancelled:
+                    return
+                for event in stream:
+                    if cancelled:
+                        break
                     delta = event.get("contentBlockDelta", {}).get("delta", {})
                     if text := delta.get("text"):
                         loop.call_soon_threadsafe(queue.put_nowait, text)
             except Exception as e:  # noqa: BLE001
-                loop.call_soon_threadsafe(queue.put_nowait, e)
+                if not cancelled:
+                    loop.call_soon_threadsafe(queue.put_nowait, e)
             finally:
                 loop.call_soon_threadsafe(queue.put_nowait, sentinel)
 
@@ -77,4 +93,10 @@ class BedrockChatClient(ChatClient):
                     raise RuntimeError(str(item)) from item
                 yield item
         finally:
+            # 呼び出し元が途中で消費をやめた場合（SSE切断等）、_run のスレッド自体は
+            # 強制終了できないため、cancelled フラグとストリームクローズで
+            # 早期にレスポンス受信を打ち切りリソース消費を抑える。
+            cancelled = True
             future.cancel()
+            if stream is not None and hasattr(stream, "close"):
+                stream.close()

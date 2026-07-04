@@ -290,7 +290,7 @@ def _make_chat_client(timeout: float | None = None):
     if config.CHAT_BACKEND == "bedrock":
         from workers.chat.bedrock_chat import BedrockChatClient
 
-        return BedrockChatClient(config.BEDROCK_CHAT_MODEL, config.AWS_REGION)
+        return BedrockChatClient(config.BEDROCK_CHAT_MODEL, config.AWS_REGION, timeout=timeout)
     raise ValueError(f"Unknown CHAT_BACKEND: {config.CHAT_BACKEND}")
 
 
