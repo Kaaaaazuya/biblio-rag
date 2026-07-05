@@ -381,10 +381,9 @@ def _validate_chat_input(body: dict) -> tuple[str | None, int]:
 
 async def chat(request: Request) -> StreamingResponse | JSONResponse:
     """RAG チャット: クエリ埋め込み → pgvector 検索 → Ollama 生成（SSE ストリーム）。"""
-    try:
-        body = await request.json()
-    except json.JSONDecodeError:
-        return JSONResponse({"detail": "リクエストボディが不正なJSONです"}, status_code=400)
+    body = await _parse_json_body(request)
+    if body is None:
+        return _invalid_json_response()
 
     # 入力検証
     error_msg, status_code = _validate_chat_input(body)
