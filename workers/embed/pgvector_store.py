@@ -7,15 +7,12 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import TYPE_CHECKING, cast
+from typing import LiteralString, cast
 
 import psycopg
 from psycopg.rows import dict_row
 
 from .base import VectorStore
-
-if TYPE_CHECKING:
-    from typing import LiteralString
 
 _UPSERT = """
 INSERT INTO chunks
@@ -73,7 +70,7 @@ class PgVectorStore(VectorStore):
         """
         with self.conn.transaction(), self.conn.cursor(row_factory=dict_row) as cur:
             # where_clause は固定の条件リテラルのみで構成され、値は params 経由のため注入安全。
-            cur.execute(cast("LiteralString", sql), params)
+            cur.execute(cast(LiteralString, sql), params)
             return cur.fetchall()
 
     def get_by_indices(self, book_id: str, chunk_indices: Sequence[int]) -> list[dict]:
