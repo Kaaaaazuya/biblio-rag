@@ -22,10 +22,6 @@ from typing import Any, cast
 import fitz
 import pymupdf4llm.helpers.pymupdf_rag as _rag
 
-# pymupdf4llm の型スタブは実 API と食い違う（margins にタプル可・page_chunks で
-# dict のリストを返す等）ため、この境界だけ Any として扱う。
-_to_markdown = cast(Any, _rag.to_markdown)
-
 NORM_PREFIX = "normalized/"
 
 HEADER_BAND = 0.07
@@ -76,15 +72,20 @@ def extract_pdf_to_markdown(src: str | Path | bytes) -> str:
         bot_margin = median_h * (1 - FOOTER_BAND)
         margins = (0, top_margin, 0, bot_margin)
 
+        # pymupdf4llm の型スタブは実 API と食い違う（margins にタプル可・page_chunks で
+        # dict のリストを返す等）ため、この境界だけ Any として扱う。
+        # _rag.to_markdown への参照はテストの monkeypatch 対応のため呼び出しごとに引く
+        # （モジュールロード時にキャッシュすると差し替えが反映されない）。
+        to_markdown = cast(Any, _rag.to_markdown)
         try:
-            indexed = list(enumerate(_to_markdown(doc, page_chunks=True, margins=margins)))
+            indexed = list(enumerate(to_markdown(doc, page_chunks=True, margins=margins)))
         except ValueError:
             # pymupdf_rag が空テーブルセルで ValueError を出すライブラリのバグへの回避策。
             # ページ単位で再処理し、問題ページだけスキップする。
             indexed = []
             for i in range(doc.page_count):
                 try:
-                    result = _to_markdown(doc, pages=[i], page_chunks=True, margins=margins)
+                    result = to_markdown(doc, pages=[i], page_chunks=True, margins=margins)
                     indexed.append((i, result[0]))
                 except ValueError:
                     pass
