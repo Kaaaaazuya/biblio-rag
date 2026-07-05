@@ -18,7 +18,7 @@ class OllamaEmbedder(Embedder):
         dim: int,
         batch_size: int = 32,
         timeout: float = 120.0,
-    ):
+    ) -> None:
         self.host = host.rstrip("/")
         self.model = model
         self.dim = dim

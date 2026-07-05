@@ -10,7 +10,7 @@ from workers.storage import ObjectStore
 from .events import s3_keys_from_event
 
 
-def handler(event: dict, context=None) -> None:
+def handler(event: dict, context: object = None) -> None:
     store = ObjectStore()
     for _bucket, key in s3_keys_from_event(event):
         book_id = PurePosixPath(key).stem

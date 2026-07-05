@@ -18,6 +18,7 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+    "basedpyright>=1.31.0",
     "moto[s3,sqs]>=5.2.2",
     "pytest>=9.1.1",
     "pytest-cov>=7.1.0",
@@ -50,7 +51,31 @@ select = [
     "B",       # flake8-bugbear（よくあるバグ）
     "SIM",     # flake8-simplify
     "C4",      # flake8-comprehensions
+    "ANN",     # flake8-annotations（型注釈の欠落を検出）
+    "RET",     # flake8-return（return 周りの簡素化）
+    "PIE",     # flake8-pie（不要コードの検出）
+    "N",       # pep8-naming（命名規約）
+    "PTH",     # flake8-use-pathlib（os.path → pathlib）
 ]
+ignore = [
+    # boto3 クライアントや JSON ボディなど、外部由来で静的に型を決められない値には
+    # 理由コメント付きで Any を許容する方針（Python AI-First 方針）のため無効化。
+    "ANN401",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# テストコードには本体ほど厳格な型注釈・pathlib を課さない（段階導入）。
+"tests/**" = ["ANN", "PTH", "PIE", "RET"]
+# スクリプト類（開発補助）は本体の型注釈基準の対象外とする。
+"scripts/**" = ["ANN"]
 
 [tool.ruff.format]
 # デフォルト（ダブルクォート・スペースインデント）を使用
+
+# --- 型チェック（BasedPyright） ---
+# 段階導入: まず standard モードで本体（workers/webui）を検査する。
+# strict 化・tests への拡大は品質が安定してから ratchet する（Python AI-First 方針）。
+[tool.basedpyright]
+include = ["workers", "webui"]
+pythonVersion = "3.14"
+typeCheckingMode = "standard"

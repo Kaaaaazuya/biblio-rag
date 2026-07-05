@@ -15,6 +15,7 @@
   - 実行: `uv run <script>` / 依存追加: `uv add <pkg>` / 同期: `uv sync`。
 - **npm は使わない**（方針）。フック類も npm 非依存（pre-commit + gitleaks）。
 - リント/整形は **Ruff**: `uv run ruff check --fix` / `uv run ruff format`。テストは `uv run pytest`。pre-commit で自動実行。
+- 型チェックは **BasedPyright**（standard・本体 `workers`/`webui`）: `uv run basedpyright`。方針は [docs/python-guidelines.md](docs/python-guidelines.md)（AI-First 開発ガイドライン。段階導入・型必須・Any 方針）。
 - 埋め込み（開発）: Ollama `bge-m3`（`http://localhost:11434/api/embed`・1024次元）。
 - ベクトル DB（開発）: pgvector on Docker。スキーマは `VECTOR(1024)`。
 
@@ -26,7 +27,7 @@ workers/{extract,chunk,embed}/  # ①②③ の処理コード
 infra/db/                       # pgvector スキーマ（開発/本番共通）
 docker/                         # docker-compose.yml
 tests/fixtures/                 # 著作権フリーのテストデータ（コミット可）
-docs/                           # design.md / commit-convention.md / adr/
+docs/                           # design.md / commit-convention.md / python-guidelines.md / adr/
 ```
 
 ## データ / セキュリティ（厳守）

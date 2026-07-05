@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import unicodedata
 from pathlib import Path
+from typing import Any
 from urllib.parse import unquote
 
 from workers import config
@@ -23,7 +24,8 @@ _META_KEYS = ("title", "author")
 
 
 class ObjectStore:
-    def __init__(self, client=None, bucket: str | None = None):
+    # client は boto3 S3 クライアント（型スタブ非導入のため Any）。
+    def __init__(self, client: Any = None, bucket: str | None = None) -> None:
         self.client = client or config.s3_client()
         self.bucket = bucket or config.S3_BUCKET
 

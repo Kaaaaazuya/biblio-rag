@@ -22,7 +22,7 @@ class OllamaChatClient(ChatClient):
         host: str,
         model: str,
         timeout: float = 120.0,
-    ):
+    ) -> None:
         self.host = host.rstrip("/")
         self.model = model
         self.timeout = timeout
