@@ -280,14 +280,17 @@ _LANG_INSTRUCTIONS: dict[str, str] = {
 
 def _make_chat_client(timeout: float | None = None):
     """設定に基づいてChatClientを作成する。"""
-    from workers.chat.ollama_chat import OllamaChatClient
-
     if config.CHAT_BACKEND == "ollama":
+        from workers.chat.ollama_chat import OllamaChatClient
+
         kwargs: dict[str, float] = {}
         if timeout is not None:
             kwargs["timeout"] = timeout
         return OllamaChatClient(config.OLLAMA_HOST, config.CHAT_MODEL, **kwargs)
-    # 将来: bedrock 実装を追加
+    if config.CHAT_BACKEND == "bedrock":
+        from workers.chat.bedrock_chat import BedrockChatClient
+
+        return BedrockChatClient(config.BEDROCK_CHAT_MODEL, config.AWS_REGION, timeout=timeout)
     raise ValueError(f"Unknown CHAT_BACKEND: {config.CHAT_BACKEND}")
 
 

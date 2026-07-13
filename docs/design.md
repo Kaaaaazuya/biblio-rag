@@ -173,7 +173,8 @@ class VectorStore(ABC):
 
 ## 12. 未決事項 / Open Questions
 
-- ~~回答生成パイプライン（検索→コンテキスト付与→回答）~~ → 最小 RAG チャット UI（`/chat.html`）を実装済み（→ [ADR 0012](adr/0012-chat-webui.md)）。本番 Bedrock 接続・エラーハンドリング詳細化は引き続き検討。
+- ~~回答生成パイプライン（検索→コンテキスト付与→回答）~~ → 最小 RAG チャット UI（`/chat.html`）を実装済み（→ [ADR 0012](adr/0012-chat-webui.md)）。
+- ~~本番 Bedrock チャット接続~~ → `CHAT_BACKEND=bedrock` で `BedrockChatClient`（Converse Stream API）に対応済み（Issue #42）。
 - ~~ハイブリッド検索（pgvector + 日本語全文検索 pg_bigm 等）の要否~~ → `HYBRID_ENABLED` フラグで実装済み（→ [ADR 0013](adr/0013-rag-precision-improvements.md)）。
 - ~~Reranker 導入の要否（検索精度チューニング時に判断）~~ → `RERANK_ENABLED` フラグで実装済み（→ [ADR 0013](adr/0013-rag-precision-improvements.md)）。
 - 書籍冊数のスケール見込み（Neon 無料枠のストレージ・CU-h 試算、超過時の Aurora 移行判断・SQS スループット試算）。
