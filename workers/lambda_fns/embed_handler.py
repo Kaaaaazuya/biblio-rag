@@ -13,7 +13,7 @@ from workers.storage import ObjectStore
 from .events import s3_keys_from_event
 
 
-def handler(event: dict, context=None) -> None:
+def handler(event: dict, context: object = None) -> None:
     store = ObjectStore()
     embedder = make_embedder()
     pg = PgVectorStore(config.database_url())

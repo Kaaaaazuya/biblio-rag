@@ -17,8 +17,10 @@ import contextlib
 import json
 import logging
 import re
+from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
 
 import httpx
@@ -34,6 +36,10 @@ from webui.auth import AuthMiddleware
 from webui.logging_config import configure_logging
 from workers import config
 from workers.storage import RAW_PREFIX, StatusStore
+
+if TYPE_CHECKING:
+    from workers.chat.base import ChatClient
+    from workers.embed.pgvector_store import PgVectorStore
 
 configure_logging()
 logger = logging.getLogger(__name__)
@@ -189,7 +195,7 @@ def _retrieve(query: str, top_k: int, book_id: str | None = None) -> list[dict]:
     return chunks
 
 
-def _expand_adjacent_chunks(chunks: list[dict], store, window: int) -> list[dict]:
+def _expand_adjacent_chunks(chunks: list[dict], store: PgVectorStore, window: int) -> list[dict]:
     """ヒットしたチャンクの前後（chunk_index ±window）を追加取得してマージする。
 
     ADJACENT_CHUNK_ENABLED 時に呼ばれる。既にヒット済みの chunk_index は
@@ -232,7 +238,7 @@ async def _hyde(query: str) -> str:
 def _hybrid_rrf(
     query: str,
     vec_chunks: list[dict],
-    store,
+    store: PgVectorStore,
     top_k: int,
     k: int = 60,
     book_id: str | None = None,
@@ -278,7 +284,7 @@ _LANG_INSTRUCTIONS: dict[str, str] = {
 }
 
 
-def _make_chat_client(timeout: float | None = None):
+def _make_chat_client(timeout: float | None = None) -> ChatClient:
     """設定に基づいてChatClientを作成する。"""
     if config.CHAT_BACKEND == "ollama":
         from workers.chat.ollama_chat import OllamaChatClient
@@ -378,10 +384,9 @@ def _validate_chat_input(body: dict) -> tuple[str | None, int]:
 
 async def chat(request: Request) -> StreamingResponse | JSONResponse:
     """RAG チャット: クエリ埋め込み → pgvector 検索 → Ollama 生成（SSE ストリーム）。"""
-    try:
-        body = await request.json()
-    except json.JSONDecodeError:
-        return JSONResponse({"detail": "リクエストボディが不正なJSONです"}, status_code=400)
+    body = await _parse_json_body(request)
+    if body is None:
+        return _invalid_json_response()
 
     # 入力検証
     error_msg, status_code = _validate_chat_input(body)
@@ -417,7 +422,7 @@ async def chat(request: Request) -> StreamingResponse | JSONResponse:
 
     if config.SCORE_THRESHOLD_ENABLED and not chunks:
         # スコア閾値未満で全チャンクが除外された場合、LLM を呼ばず幻覚を防ぐ
-        async def no_results_stream():
+        async def no_results_stream() -> AsyncIterator[str]:
             yield f"data: {json.dumps({'type': 'sources', 'sources': []})}\n\n"
             msg = json.dumps({"type": "token", "content": _NO_RESULTS_MESSAGE}, ensure_ascii=False)
             yield f"data: {msg}\n\n"
@@ -450,7 +455,7 @@ async def chat(request: Request) -> StreamingResponse | JSONResponse:
         {"role": "user", "content": query},
     ]
 
-    async def event_stream():
+    async def event_stream() -> AsyncIterator[str]:
         src_msg = json.dumps({"type": "sources", "sources": sources}, ensure_ascii=False)
         yield f"data: {src_msg}\n\n"
         try:
@@ -478,19 +483,28 @@ async def chat(request: Request) -> StreamingResponse | JSONResponse:
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
-async def _parse_json_body(request: Request) -> tuple[dict, None] | tuple[None, JSONResponse]:
+# JSON ボディの値は外部入力で型が動的に定まらないため Any を許容する。
+_JsonBody = dict[str, Any]
+
+
+async def _parse_json_body(request: Request) -> _JsonBody | None:
     """リクエストボディを JSON dict としてパースする。
 
     不正な JSON、または JSON として妥当でも dict でないボディ（null・配列・文字列など）は
-    400 エラーレスポンスとして返す。
+    None を返す（呼び出し側で 400 エラーレスポンスに変換する）。
     """
     try:
         body = await request.json()
     except ValueError:
-        return None, JSONResponse({"detail": "不正な JSON ボディです"}, status_code=400)
+        return None
     if not isinstance(body, dict):
-        return None, JSONResponse({"detail": "不正な JSON ボディです"}, status_code=400)
-    return body, None
+        return None
+    return body
+
+
+def _invalid_json_response() -> JSONResponse:
+    """不正な JSON ボディに対する 400 レスポンスを返す。"""
+    return JSONResponse({"detail": "不正な JSON ボディです"}, status_code=400)
 
 
 async def presign(request: Request) -> JSONResponse:
@@ -501,9 +515,9 @@ async def presign(request: Request) -> JSONResponse:
     - 既存オブジェクトの有無（上書き防止）
     - Content-Length が上限以下か（500MB）
     """
-    body, error_response = await _parse_json_body(request)
-    if error_response is not None:
-        return error_response
+    body = await _parse_json_body(request)
+    if body is None:
+        return _invalid_json_response()
     try:
         name = _safe_name(body.get("filename", ""))
     except ValueError as e:
@@ -568,9 +582,9 @@ async def save_meta(request: Request) -> JSONResponse:
     - title/author の必須入力
     - Content-Length が上限以下か（500MB）
     """
-    body, error_response = await _parse_json_body(request)
-    if error_response is not None:
-        return error_response
+    body = await _parse_json_body(request)
+    if body is None:
+        return _invalid_json_response()
     title = (body.get("title") or "").strip()
     author = (body.get("author") or "").strip()
     if not title or not author:
@@ -627,9 +641,9 @@ async def save_meta(request: Request) -> JSONResponse:
 
 async def ingest(request: Request) -> JSONResponse:
     """取り込みパイプライン（extract→chunk→embed）をバックグラウンドで起動する。"""
-    body, error_response = await _parse_json_body(request)
-    if error_response is not None:
-        return error_response
+    body = await _parse_json_body(request)
+    if body is None:
+        return _invalid_json_response()
     try:
         book_id = _safe_name(body.get("book_id", ""))
     except ValueError as e:
@@ -660,15 +674,14 @@ def ingest_status(request: Request) -> JSONResponse:
                         "updated_at": updated_at_str,
                     }
                 )
-            else:
-                return JSONResponse(
-                    {
-                        "status": "unknown",
-                        "chunks_processed": 0,
-                        "error": None,
-                        "updated_at": None,
-                    }
-                )
+            return JSONResponse(
+                {
+                    "status": "unknown",
+                    "chunks_processed": 0,
+                    "error": None,
+                    "updated_at": None,
+                }
+            )
         finally:
             if store is not _status_store:
                 store.close()
@@ -690,7 +703,7 @@ def ingest_status_history(request: Request) -> JSONResponse:
             if not history:
                 return JSONResponse([])
 
-            def format_record(record):
+            def format_record(record: dict) -> dict:
                 created_at = record.get("created_at")
                 return {
                     "status": record.get("status"),

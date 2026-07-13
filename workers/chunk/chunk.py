@@ -171,7 +171,7 @@ def _parse_sections(md: str) -> list[tuple[list[str], str, int | None]]:
 class HeuristicChunker(Chunker):
     """ADR 0007 のヒューリスティック分割（文字数 + 句点 + 見出し境界尊重）。"""
 
-    def __init__(self, size: int = DEFAULT_SIZE, overlap: int = DEFAULT_OVERLAP):
+    def __init__(self, size: int = DEFAULT_SIZE, overlap: int = DEFAULT_OVERLAP) -> None:
         if overlap >= size:
             raise ValueError("overlap は size より小さくしてください")
         self.size = size

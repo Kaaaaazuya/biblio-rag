@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from typing import LiteralString, cast
 
 import psycopg
 from psycopg.rows import dict_row
@@ -31,7 +32,7 @@ def _vec_literal(vec: Sequence[float]) -> str:
 
 
 class PgVectorStore(VectorStore):
-    def __init__(self, dsn: str):
+    def __init__(self, dsn: str) -> None:
         self.conn = psycopg.connect(dsn, autocommit=False)
 
     def upsert(self, chunks: list[dict], vectors: list[list[float]]) -> None:
@@ -68,7 +69,8 @@ class PgVectorStore(VectorStore):
             LIMIT %(k)s
         """
         with self.conn.transaction(), self.conn.cursor(row_factory=dict_row) as cur:
-            cur.execute(sql, params)
+            # where_clause は固定の条件リテラルのみで構成され、値は params 経由のため注入安全。
+            cur.execute(cast(LiteralString, sql), params)
             return cur.fetchall()
 
     def get_by_indices(self, book_id: str, chunk_indices: Sequence[int]) -> list[dict]:
@@ -106,7 +108,8 @@ class PgVectorStore(VectorStore):
         """その書籍が既に格納されているか（チャンク行数）。増分判定に使う。"""
         with self.conn.transaction(), self.conn.cursor() as cur:
             cur.execute("SELECT count(*) FROM chunks WHERE book_id = %s", (book_id,))
-            return cur.fetchone()[0]
+            row = cur.fetchone()
+            return row[0] if row is not None else 0
 
     def delete_book(self, book_id: str) -> int:
         """その書籍のチャンクを全削除（洗い替え/再投入前のクリーンアップ）。"""

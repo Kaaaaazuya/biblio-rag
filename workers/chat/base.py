@@ -11,12 +11,15 @@ from collections.abc import AsyncIterator
 
 class ChatClient(ABC):
     @abstractmethod
-    async def stream_chat(
+    def stream_chat(
         self,
         messages: list[dict],
         model: str | None = None,
     ) -> AsyncIterator[str]:
         """チャットメッセージをストリーミング生成する。各トークンを yield する。
+
+        非同期ジェネレータの契約。実装は ``async def`` + ``yield`` で提供する
+        （呼び出し側は ``async for`` で消費する）。
 
         Args:
             messages: role/content を持つメッセージ辞書のリスト。

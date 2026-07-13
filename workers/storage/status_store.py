@@ -6,8 +6,13 @@ Provides interface for tracking status transitions and maintaining historical re
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import psycopg
 from psycopg.rows import dict_row
+
+if TYPE_CHECKING:
+    from types import TracebackType
 
 
 class StatusStore:
@@ -16,7 +21,7 @@ class StatusStore:
     Maintains current status and historical records for each book.
     """
 
-    def __init__(self, dsn: str):
+    def __init__(self, dsn: str) -> None:
         """Initialize connection to PostgreSQL.
 
         Args:
@@ -27,7 +32,12 @@ class StatusStore:
     def __enter__(self) -> StatusStore:
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None:
         self.close()
 
     def set_status(

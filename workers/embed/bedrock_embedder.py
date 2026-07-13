@@ -14,7 +14,7 @@ from .base import Embedder
 
 
 class BedrockEmbedder(Embedder):
-    def __init__(self, model_id: str, dim: int, region: str = "ap-northeast-1"):
+    def __init__(self, model_id: str, dim: int, region: str = "ap-northeast-1") -> None:
         self._client = boto3.client("bedrock-runtime", region_name=region)
         self.model_id = model_id
         self.dim = dim

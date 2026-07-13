@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import Any
 
 from dotenv import load_dotenv
 
@@ -58,7 +59,8 @@ WEBUI_AUTH_USERNAME = os.getenv("WEBUI_AUTH_USERNAME", "")
 WEBUI_AUTH_PASSWORD = os.getenv("WEBUI_AUTH_PASSWORD", "")
 
 
-def s3_client():
+# boto3 は型スタブ非導入のためクライアントは動的型（Any）。
+def s3_client() -> Any:
     """boto3 S3 クライアント。資格情報は環境変数（.env）から自動解決。"""
     import boto3
 
